@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Projets — Timing{% endblock %}
+
+{% block content %}
+{% set status_label = {'provisional': 'provisoire', 'confirmed': 'confirmé', 'paused': 'en pause', 'completed': 'terminé'} %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Vue d'ensemble</p>
+    <h1>Projets</h1>
+  </div>
+  <a href="{{ url_for('new_project') }}" class="btn btn-primary">+ Nouveau projet</a>
+</div>
+
+<div class="tabs">
+  <a href="{{ url_for('projects_list', status='confirmed') }}" class="{{ 'is-active' if status_filter == 'confirmed' }}">Confirmés</a>
+  <a href="{{ url_for('projects_list', status='provisional') }}" class="{{ 'is-active' if status_filter == 'provisional' }}">Provisoires</a>
+  <a href="{{ url_for('projects_list', status='paused') }}" class="{{ 'is-active' if status_filter == 'paused' }}">En pause</a>
+  <a href="{{ url_for('projects_list', status='completed') }}" class="{{ 'is-active' if status_filter == 'completed' }}">Terminés</a>
+  <a href="{{ url_for('projects_list', status='all') }}" class="{{ 'is-active' if status_filter == 'all' }}">Tous</a>
+</div>
+
+{% if rows %}
+<section class="card">
+  <table class="entries">
+    <thead><tr><th>Projet</th><th>Client</th><th>Statut</th><th>Consommé</th><th>Taux réel</th><th>Taux prévu</th></tr></thead>
+    <tbody>
+      {% for row in rows %}
+      {% set stats = row.stats %}
+      <tr onclick="window.location='{{ url_for('project_detail', project_id=row.project.id) }}'" style="cursor:pointer;">
+        <td><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:{{ row.project.color }}; margin-right:8px;"></span><span style="font-family: var(--font-display); font-weight:600;">{{ row.project.name }}</span></td>
+        <td>{{ row.project.client or '—' }}</td>
+        <td><span class="pill pill-{{ row.project.status }}">{{ status_label[row.project.status] }}</span></td>
+        <td class="mono">{{ stats.pct_consumed }}%</td>
+        <td class="mono">{% if stats.real_hourly_rate %}{{ '%.0f'|format(stats.real_hourly_rate) }}{{ currency }}/h{% else %}—{% endif %}</td>
+        <td class="mono">{% if stats.theoretical_hourly_rate %}{{ '%.0f'|format(stats.theoretical_hourly_rate) }}{{ currency }}/h{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% else %}
+<div class="empty">
+  <h3>Aucun projet dans cette catégorie</h3>
+  <p>Change de filtre ou <a href="{{ url_for('new_project') }}" style="color: var(--accent-text); text-decoration:underline;">crée un nouveau projet</a>.</p>
+</div>
+{% endif %}
+{% endblock %}

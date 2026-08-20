@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Comparatif — Timing{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Rentabilité</p>
+    <h1>Comparatif</h1>
+  </div>
+</div>
+
+<div class="tabs">
+  <a href="{{ url_for('comparatif', tab='rentabilite') }}" class="{{ 'is-active' if tab == 'rentabilite' }}">Par projet</a>
+  <a href="{{ url_for('comparatif', tab='taches') }}" class="{{ 'is-active' if tab == 'taches' }}">Par tâche</a>
+</div>
+
+{% if tab == 'rentabilite' %}
+<p class="muted" style="max-width: 60ch; margin-top: -8px; margin-bottom: var(--space-5);">
+  L'indice compare ton taux horaire réel à celui prévu à la vente. Au-dessus de ×1, le projet rapporte plus que prévu par heure.
+</p>
+{% if rows %}
+<section class="card">
+  <table class="entries">
+    <thead><tr><th>Projet</th><th>Statut</th><th>Taux réel</th><th>Taux prévu</th><th>Indice</th><th>Consommé</th></tr></thead>
+    <tbody>
+      {% for row in rows %}
+      {% set stats = row.stats %}
+      <tr onclick="window.location='{{ url_for('project_detail', project_id=row.project.id) }}'" style="cursor:pointer;">
+        <td><span style="font-family: var(--font-display); font-weight:600;">{{ row.project.name }}</span></td>
+        <td class="muted" style="font-size:12.5px;">{{ row.project.status }}</td>
+        <td class="mono">{% if stats.real_hourly_rate %}{{ '%.0f'|format(stats.real_hourly_rate) }}{{ currency }}/h{% else %}—{% endif %}</td>
+        <td class="mono">{% if stats.theoretical_hourly_rate %}{{ '%.0f'|format(stats.theoretical_hourly_rate) }}{{ currency }}/h{% else %}—{% endif %}</td>
+        <td class="mono">{% if stats.rentability_index %}<span class="{{ 'rank-index positive' if stats.rentability_index >= 1 else 'rank-index negative' }}">×{{ '%.2f'|format(stats.rentability_index) }}</span>{% else %}—{% endif %}</td>
+        <td class="mono">{{ stats.pct_consumed }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% else %}
+<div class="empty"><h3>Rien à comparer pour l'instant</h3><p>Ajoute des heures sur tes projets pour voir apparaître leur rentabilité ici.</p></div>
+{% endif %}
+
+{% else %}
+<p class="muted" style="max-width: 60ch; margin-top: -8px; margin-bottom: var(--space-5);">
+  Temps total passé par type de tâche, tous projets confondus — utile pour voir où part le temps globalement (ex. combien en réunions client vs en production).
+</p>
+{% if task_rows %}
+<section class="card">
+  {% for row in task_rows %}
+  <div class="task-row">
+    <div class="task-name">{{ row.name }}</div>
+    <div class="task-bar-track"><div class="task-bar-fill" style="width:{{ row.pct }}%;"></div></div>
+    <div class="task-pct">{{ row.hours }}h · {{ row.pct }}%</div>
+  </div>
+  {% endfor %}
+</section>
+{% else %}
+<div class="empty"><h3>Pas encore de tâches</h3><p>Ajoute des tâches à tes projets pour voir cette répartition.</p></div>
+{% endif %}
+{% endif %}
+{% endblock %}

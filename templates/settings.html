@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Réglages — Timing{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Configuration</p>
+    <h1>Réglages</h1>
+  </div>
+</div>
+
+<section class="card" style="max-width: 480px;">
+  <form method="post">
+    <div class="field">
+      <label for="default_hours_per_day">Heures / jour par défaut</label>
+      <input id="default_hours_per_day" name="default_hours_per_day" type="number" step="0.5" min="1"
+             value="{{ settings.default_hours_per_day }}">
+      <p class="field-hint">Sert à convertir un % de journée saisi en heures, et les jours vendus en heures vendues.</p>
+    </div>
+    <div class="field">
+      <label for="currency_symbol">Devise</label>
+      <input id="currency_symbol" name="currency_symbol" type="text" maxlength="3" value="{{ settings.currency_symbol }}">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="peak_threshold_warning">Seuil "chargé" (%)</label>
+        <input id="peak_threshold_warning" name="peak_threshold_warning" type="number" step="5" min="1"
+               value="{{ settings.peak_threshold_warning|int }}">
+      </div>
+      <div class="field">
+        <label for="peak_threshold_danger">Seuil "tempête" (%)</label>
+        <input id="peak_threshold_danger" name="peak_threshold_danger" type="number" step="5" min="1"
+               value="{{ settings.peak_threshold_danger|int }}">
+      </div>
+    </div>
+    <p class="field-hint" style="margin-top:-8px; margin-bottom: var(--space-4);">
+      Un jour où la charge cumulée dépasse ces seuils passe respectivement en ambre puis en rouge sur la carte de charge.
+    </p>
+    <button type="submit" class="btn btn-primary">Enregistrer</button>
+  </form>
+</section>
+{% endblock %}
