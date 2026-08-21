@@ -344,6 +344,7 @@ def dashboard():
         cards=cards, ranked=ranked[:5], loggable=loggable, break_even=break_even,
         rank_by=rank_by,
         capacity=capacity, capacity_summary=calc.capacity_summary(capacity),
+        capacity_scale=calc.capacity_scale(capacity),
         include_provisional=include_provisional,
         today_logged=db.today_summary(today.isoformat()),
         alerts=alerts, revenue=revenue, settings=settings,
@@ -679,6 +680,7 @@ def planning():
     return render_template(
         "planning.html", rows=rows, capacity=capacity,
         capacity_summary=calc.capacity_summary(capacity),
+        capacity_scale=calc.capacity_scale(capacity),
         window_days=PLANNING_WINDOW_DAYS,
         today_idx=(date.today() - window_start).days,
         week_labels=week_labels, include_provisional=include_provisional,

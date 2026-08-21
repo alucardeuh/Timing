@@ -80,7 +80,7 @@
     box.appendChild(list);
   }
 
-  document.querySelectorAll(".day-cell").forEach((cell) => {
+  document.querySelectorAll(".day-cell, .cap-col").forEach((cell) => {
     const handler = () => renderDetail(cell);
     cell.addEventListener("mouseenter", handler);
     cell.addEventListener("click", handler);

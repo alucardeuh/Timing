@@ -60,11 +60,16 @@
         {% endfor %}
 
         <div class="gantt-row gantt-capacity" style="grid-template-columns: repeat({{ window_days }}, 1fr);">
+          <div class="cap-baseline cap-baseline-full" style="bottom: {{ (100 / capacity_scale * 100)|round(2) }}%;"></div>
           {% for day in capacity %}
-          <div class="day-cell level-{{ day.level }} {{ 'has-provisional' if day.has_provisional }} {{ 'has-overrun' if day.has_overrun }} {{ 'is-today' if day.date.isoformat() == today }}"
+          <div class="cap-col level-{{ day.level }} {{ 'has-overrun' if day.has_overrun }} {{ 'is-today' if day.date.isoformat() == today }}"
                data-date="{{ day.date.strftime('%a %d %b') }}" data-pct="{{ day.pct_total }}"
                data-off="{{ day.off_reason or '' }}"
-               data-contributors='{{ day.contributors|tojson }}'></div>
+               data-contributors='{{ day.contributors|tojson }}'
+               title="{{ day.date.strftime('%d/%m') }} — {{ day.pct_total }}%">
+            <div class="cap-fill cap-confirmed" style="height: {{ (day.pct_confirmed / capacity_scale * 100)|round(2) }}%;"></div>
+            <div class="cap-fill cap-provisional" style="height: {{ (day.pct_provisional / capacity_scale * 100)|round(2) }}%;"></div>
+          </div>
           {% endfor %}
         </div>
       </div>

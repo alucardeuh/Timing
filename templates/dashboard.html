@@ -116,24 +116,46 @@
     {{ capacity_summary.storm_days }} en surcharge.
   </p>
 
-  <div class="capacity-strip">
+  <div class="capacity-columns" style="--cap-scale: {{ capacity_scale }};">
+    <div class="cap-baseline cap-baseline-full" style="bottom: {{ (100 / capacity_scale * 100)|round(2) }}%;">
+      <span class="cap-baseline-label">100%</span>
+    </div>
+    {% if settings.peak_threshold_warning < capacity_scale %}
+    <div class="cap-baseline cap-baseline-warn" style="bottom: {{ (settings.peak_threshold_warning / capacity_scale * 100)|round(2) }}%;">
+      <span class="cap-baseline-label">{{ settings.peak_threshold_warning|int }}%</span>
+    </div>
+    {% endif %}
+
     {% for day in capacity %}
-    <div class="day-cell level-{{ day.level }} {{ 'has-provisional' if day.has_provisional }} {{ 'has-overrun' if day.has_overrun }} {{ 'is-today' if day.date.isoformat() == today }}"
+    <div class="cap-col level-{{ day.level }} {{ 'week-start' if day.date.weekday() == 0 and not loop.first }} {{ 'has-overrun' if day.has_overrun }} {{ 'is-today' if day.date.isoformat() == today }}"
          data-date="{{ day.date.strftime('%a %d %b') }}"
          data-pct="{{ day.pct_total }}"
          data-off="{{ day.off_reason or '' }}"
-         data-contributors='{{ day.contributors|tojson }}'></div>
+         data-contributors='{{ day.contributors|tojson }}'
+         title="{{ day.date.strftime('%d/%m') }} — {{ day.pct_total }}%{% if day.off_reason %} ({{ day.off_reason }}){% endif %}">
+      <div class="cap-fill cap-confirmed" style="height: {{ (day.pct_confirmed / capacity_scale * 100)|round(2) }}%;"></div>
+      <div class="cap-fill cap-provisional" style="height: {{ (day.pct_provisional / capacity_scale * 100)|round(2) }}%;"></div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="cap-axis">
+    {% for day in capacity %}
+      {% if day.date.weekday() == 0 %}
+      <span class="cap-axis-tick mono" style="left: {{ (loop.index0 / capacity|length * 100)|round(3) }}%;">{{ day.date.strftime('%d/%m') }}</span>
+      {% endif %}
     {% endfor %}
   </div>
   <div class="day-detail" id="day-detail">Survole ou clique un jour pour voir le détail.</div>
 
   <div class="capacity-legend">
-    <span><span class="swatch" style="background: var(--load-light-bg); border:1px solid var(--load-light);"></span>léger</span>
-    <span><span class="swatch" style="background: var(--load-heavy-bg); border:1px solid var(--load-heavy);"></span>chargé</span>
-    <span><span class="swatch" style="background: var(--load-storm-bg); border:1px solid var(--load-storm);"></span>tempête</span>
+    <span><span class="swatch" style="background: var(--load-light);"></span>léger</span>
+    <span><span class="swatch" style="background: var(--load-heavy);"></span>chargé</span>
+    <span><span class="swatch" style="background: var(--load-storm);"></span>tempête</span>
     <span><span class="swatch swatch-off"></span>non travaillé</span>
-  <span><span class="swatch swatch-overrun"></span>projet prolongé</span>
-    <span><span class="swatch swatch-hatched"></span>inclut du provisoire</span>
+    <span><span class="swatch swatch-overrun"></span>projet prolongé</span>
+    <span><span class="swatch swatch-hatched"></span>part provisoire</span>
+    <span class="faint legend-note">La hauteur d'une colonne est la charge du jour ; le pointillé rouge marque 100 % de ta capacité.</span>
   </div>
 </section>
 

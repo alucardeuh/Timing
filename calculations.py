@@ -618,6 +618,18 @@ def daily_capacity(projects, window_start, window_days, include_provisional,
     return days
 
 
+def capacity_scale(capacity, minimum=120):
+    """Hauteur de référence des colonnes de la carte de charge.
+
+    Au moins `minimum` pour que la ligne des 100 % reste visible même sur une
+    période calme, et au moins le pic réel pour qu'aucune colonne ne soit
+    tronquée. Arrondi à la dizaine supérieure : une échelle qui bouge à
+    chaque pourcentage rendrait deux semaines incomparables entre elles.
+    """
+    peak = max((d["pct_total"] for d in capacity), default=0)
+    return max(minimum, int((peak + 9) // 10 * 10))
+
+
 def capacity_summary(capacity):
     """Résumé chiffré d'une fenêtre de charge : de quoi écrire une phrase
     plutôt que de laisser lire une bande de couleurs."""

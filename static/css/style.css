@@ -214,7 +214,8 @@ h3 { font-size: 15.5px; }
 .day-cell.is-today { box-shadow: 0 0 0 2px var(--text) inset; }
 .day-cell.is-weekend { opacity: 0.55; }
 
-.capacity-legend { display: flex; gap: var(--space-4); font-size: 12px; color: var(--text-muted); margin-top: var(--space-2); align-items: center; }
+.capacity-legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); font-size: 12px; color: var(--text-muted); margin-top: var(--space-3); align-items: center; }
+.capacity-legend .legend-note { flex-basis: 100%; }
 .capacity-legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
 
 .day-detail { margin-top: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--panel-2); border-radius: var(--radius-sm); font-size: 13px; min-height: 20px; }
@@ -513,3 +514,75 @@ table.entries tr:hover td { background: var(--panel-2); }
 .rank-switch a { padding: 3px 9px; border-radius: 100px; color: var(--text-muted); text-decoration: none; }
 .rank-switch a.is-active { background: var(--accent-light); color: var(--accent-text); font-weight: 500; }
 .rank-amount { margin-left: auto; padding-right: var(--space-3); color: var(--text-muted); font-size: 13px; }
+
+/* =====================================================================
+   Carte de charge en colonnes
+   La hauteur porte l'information, pas seulement la couleur : un jour à
+   140 % et un jour à 105 % étaient auparavant deux carrés rouges
+   identiques. Les lignes de référence rendent les seuils lisibles sans
+   avoir à survoler.
+   ===================================================================== */
+.capacity-columns {
+  position: relative; display: flex; align-items: flex-end; gap: 2px;
+  height: 132px; margin: var(--space-4) 0 0;
+  padding-bottom: 2px; padding-right: 38px;
+  border-bottom: 1px solid var(--border);
+}
+.cap-col {
+  flex: 1; height: 100%; min-width: 4px; cursor: pointer;
+  display: flex; flex-direction: column-reverse; justify-content: flex-start;
+  position: relative; border-radius: 2px 2px 0 0;
+  transition: opacity .1s ease;
+}
+.cap-col:hover { opacity: .75; }
+.cap-fill { width: 100%; border-radius: 2px 2px 0 0; }
+.cap-confirmed { background: var(--load-light); }
+.cap-provisional { background: var(--load-light); opacity: .45;
+  background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.55) 0 3px, transparent 3px 7px); }
+.cap-col.level-heavy .cap-fill { background-color: var(--load-heavy); }
+.cap-col.level-storm .cap-fill { background-color: var(--load-storm); }
+.cap-col.level-free .cap-fill,
+.cap-col.level-off .cap-fill { background: none; }
+
+/* Jour non travaillé : un socle hachuré, sans hauteur — il ne porte
+   aucune charge, il ne doit donc pas former de colonne. */
+.cap-col.level-off::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 5px;
+  background: repeating-linear-gradient(45deg, var(--border) 0 2px, transparent 2px 5px);
+  border-radius: 2px;
+}
+.cap-col.has-overrun .cap-confirmed {
+  background-image: repeating-linear-gradient(90deg, rgba(0,0,0,.22) 0 2px, transparent 2px 6px);
+}
+.cap-col.is-today { background: rgba(0, 0, 0, .04); border-radius: 3px 3px 0 0; }
+.cap-col.is-today::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -4px; height: 3px;
+  background: var(--text); border-radius: 2px; pointer-events: none;
+}
+.cap-col.week-start { box-shadow: -3px 0 0 -2px var(--border); }
+
+/* Lignes de référence : 100 % et seuil « chargé » ---------------------- */
+.cap-baseline { position: absolute; left: 0; right: 38px; height: 0;
+  border-top: 1px dashed var(--border); pointer-events: none; z-index: 1; }
+.cap-baseline-full { border-top-color: var(--load-storm); opacity: .55; }
+.cap-baseline-warn { border-top-color: var(--load-heavy); opacity: .4; }
+.cap-baseline-label { position: absolute; left: 100%; top: -7px;
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint);
+  padding-left: 6px; white-space: nowrap; }
+
+.cap-axis { position: relative; height: 16px; margin-bottom: var(--space-2); }
+.cap-axis-tick { position: absolute; top: 2px; font-size: 9.5px; color: var(--text-faint); }
+
+/* Bande de charge du planning : mêmes colonnes, mais contraintes par la
+   grille du Gantt pour rester alignées colonne par colonne. */
+.gantt-capacity { height: 62px; align-items: end; position: relative; gap: 0; }
+.gantt-capacity .cap-col { min-width: 0; border-radius: 1px 1px 0 0; }
+.gantt-capacity .cap-col.week-start { margin-left: 0; }
+.gantt-capacity .cap-baseline-label { display: none; }
+
+/* Responsive : sur mobile, moins de hauteur et pas de séparateur --------- */
+@media (max-width: 620px) {
+  .capacity-columns { height: 96px; }
+  .cap-col.week-start { box-shadow: none; }
+  .cap-axis-tick:nth-child(even) { display: none; }
+}
