@@ -19,13 +19,22 @@
         <input id="name" name="name" type="text" value="{{ d.name if d else '' }}" required>
       </div>
       <div class="field">
-        <label for="client">Client</label>
-        <input id="client" name="client" type="text" list="clients-connus"
-               value="{{ d.client if d else '' }}" placeholder="Tape un nom, ou choisis-en un">
-        <datalist id="clients-connus">
-          {% for c in known_clients %}<option value="{{ c.client }}">{% endfor %}
-        </datalist>
-        <p class="field-hint">Il n'y a pas de page pour créer un client : tape simplement son nom ici. La page Clients regroupe ensuite tous les projets portant le même nom.</p>
+        <label for="client_id">Client</label>
+        <select id="client_id" name="client_id">
+          <option value="">— aucun —</option>
+          {% for c in known_clients %}
+          <option value="{{ c.id }}" {{ 'selected' if selected_client_id == c.id }}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+        <p class="field-hint">
+          <a href="{{ url_for('new_client') }}" class="inline-link">Créer une fiche client</a>
+          pour enregistrer coordonnées, TJM habituel et délai de paiement.
+        </p>
+      </div>
+      <div class="field">
+        <label for="client_new">ou nouveau client</label>
+        <input id="client_new" name="client_new" type="text" placeholder="Tape un nom">
+        <p class="field-hint">Rempli, ce champ l'emporte : la fiche est créée automatiquement.</p>
       </div>
     </div>
 

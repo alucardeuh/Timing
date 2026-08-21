@@ -92,8 +92,10 @@ précisément quand un projet en dépassement mangeait les journées à venir.
   **prévisionnel d'encaissement** sur trois mois basé sur le délai de
   paiement réellement constaté par client. Les jalons sont modifiables et
   leur date de facturation antidatable.
-- **Clients** (`/clients`) — CA par client, part de chacun dans ton activité
-  (alerte au-delà de 50 %), et marge par jour réellement passé par client.
+- **Clients** (`/clients`) — fiches en cartes (projets, CA, marge par jour,
+  délai de paiement), création et édition, fiche détaillée par client avec ses
+  projets et sa facturation. Plus la répartition du CA, la part de chacun
+  (alerte au-delà de 50 %) et la marge par jour réellement passé.
 - **Comparatif** (`/comparatif`) — rentabilité de tous les projets, temps par
   tâche, et évolution mensuelle (jours travaillés + CA facturé).
 - **Absences** (`/absences`) — congés, fériés, indisponibilités.
@@ -108,9 +110,17 @@ Sans rien déclarer, elle est **lissée** sur tous les jours ouvrés : un projet
 vendu 2 j/semaine apparaît à 40 % du lundi au vendredi — une moyenne honnête,
 mais pas un planning. Cocher les jours rend le planning littéral.
 
-**Clients.** Il n'y a pas de fiche client à créer : un client existe dès qu'un
-projet porte son nom, dans le champ « Client » du formulaire projet. La page
-Clients regroupe ensuite tous les projets portant le même nom.
+**Clients.** Chaque client a une fiche : coordonnées, TJM habituel, délai de
+paiement contractuel, notes. Deux façons d'en créer une — depuis la page
+Clients (utile pour un prospect sans projet), ou en tapant simplement un nom
+inconnu dans le champ « Client » d'un projet, auquel cas la fiche se crée
+automatiquement. Le rapprochement ignore la casse, donc « Alpha SA » et
+« alpha sa » ne font qu'un.
+
+Le TJM habituel est repris quand tu laisses le champ vide à la création d'un
+projet. Renommer une fiche met à jour tous ses projets. La supprimer conserve
+les projets et leur nom de client : supprimer un contact ne doit pas effacer
+l'historique de facturation qui s'y rattache.
 
 **Tâches.** Optionnelles, elles se créent depuis la fiche d'un projet et
 servent à savoir où part le temps *à l'intérieur* du projet.
@@ -169,7 +179,7 @@ pip install pytest
 python3 -m pytest tests/ -q
 ```
 
-73 tests sur les calculs et la couche données : capacité en jours ouvrés,
+81 tests sur les calculs et la couche données : capacité en jours ouvrés,
 dépassement, rentabilité et garde-fous de fiabilité, coût de revient,
 indépendance des jours vis-à-vis du réglage horaire, détection des jours non
 saisis, validation des statuts, corbeille, grille hebdo (dates, atomicité,

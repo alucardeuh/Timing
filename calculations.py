@@ -998,7 +998,7 @@ def gantt_rows(projects, window_start, window_days, settings=None, today=None):
 DEFAULT_PAYMENT_DELAY = 30  # jours, faute d'historique pour ce client
 
 
-def cash_forecast(open_milestones, delays, months=3, today=None):
+def cash_forecast(open_milestones, delays, months=3, today=None, contractual=None):
     """Projette les encaissements à venir, mois par mois.
 
     Un jalon déjà facturé est daté à `invoiced_at + délai du client` ; un
@@ -1007,7 +1007,11 @@ def cash_forecast(open_milestones, delays, months=3, today=None):
 
     Pour un indépendant, savoir ce qui tombe en octobre est plus actionnable
     que de savoir quel projet a le meilleur indice.
+
+    Ordre de préférence pour le délai : constaté sur l'historique, puis
+    contractuel (fiche client), puis valeur par défaut.
     """
+    contractual = contractual or {}
     today = today or date.today()
     buckets = {}
     for i in range(months):
@@ -1018,7 +1022,8 @@ def cash_forecast(open_milestones, delays, months=3, today=None):
     overdue = []
     for m in open_milestones:
         client = m["project_client"] or "Sans client"
-        delay = delays.get(client, {}).get("days", DEFAULT_PAYMENT_DELAY)
+        delay = delays.get(client, {}).get(
+            "days", contractual.get(client, DEFAULT_PAYMENT_DELAY))
 
         if m["status"] == "invoiced" and m["invoiced_at"]:
             base = parse_date(m["invoiced_at"][:10], default=None)

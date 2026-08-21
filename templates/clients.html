@@ -4,13 +4,13 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <p class="eyebrow">Concentration &amp; rentabilité</p>
+    <p class="eyebrow">Fiches, concentration &amp; rentabilité</p>
     <h1>Clients</h1>
   </div>
+  <a href="{{ url_for('new_client') }}" class="btn btn-primary">+ Nouveau client</a>
 </div>
 
-{% if clients %}
-{% if clients[0].share >= 50 %}
+{% if clients and clients[0].share >= 50 %}
 <section class="card">
   <ul class="alert-list">
     <li class="alert alert-warning"><span class="alert-dot"></span>
@@ -21,7 +21,58 @@
 </section>
 {% endif %}
 
-<section class="card {{ 'section-gap' if clients[0].share >= 50 }}">
+{% if records %}
+<div class="client-grid {{ 'section-gap' if clients and clients[0].share >= 50 }}">
+  {% for c in records %}
+  {% set r = rollup.get(c.name) %}
+  <a class="card client-card" href="{{ url_for('client_detail', client_id=c.id) }}">
+    <div class="client-card-head">
+      <span class="client-name">{{ c.name }}</span>
+      {% if r %}<span class="client-share mono">{{ r.share }}%</span>{% endif %}
+    </div>
+    {% if c.contact_name or c.email %}
+    <div class="client-contact">{{ c.contact_name or c.email }}</div>
+    {% endif %}
+    <div class="client-metrics">
+      <div>
+        <div class="metric-label">Projets</div>
+        <div class="metric-value">{{ c.projects_count }}</div>
+      </div>
+      <div>
+        <div class="metric-label">CA</div>
+        <div class="metric-value">{% if r %}{{ '{:,.0f}'.format(r.revenue)|replace(',', ' ') }}{{ currency }}{% else %}—{% endif %}</div>
+      </div>
+      <div>
+        <div class="metric-label">Marge/j</div>
+        <div class="metric-value">{% if r and r.real_day_rate %}{{ '%.0f'|format(r.real_day_rate) }}{{ currency }}{% else %}—{% endif %}</div>
+      </div>
+      <div>
+        <div class="metric-label">Paiement</div>
+        <div class="metric-value">
+          {% if delays.get(c.name) %}{{ delays[c.name].days|int }} j
+          {% elif c.payment_terms_days %}{{ c.payment_terms_days }} j
+          {% else %}—{% endif %}
+        </div>
+      </div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <h3>Aucun client</h3>
+  <p>
+    Crée une fiche pour retrouver un client d'un projet à l'autre, avec ses
+    coordonnées, son TJM habituel et son délai de paiement. Tu peux aussi
+    simplement taper un nom dans le champ « Client » d'un projet : la fiche
+    est alors créée automatiquement.
+  </p>
+  <a href="{{ url_for('new_client') }}" class="btn btn-primary" style="margin-top: var(--space-4);">Créer un client</a>
+</div>
+{% endif %}
+
+{% if clients %}
+<section class="card section-gap">
   <div class="card-title-row"><h3>Répartition du CA</h3></div>
   {% for c in clients %}
   <div class="task-row">
@@ -63,24 +114,11 @@
   </div>
   <p class="faint" style="margin-top: var(--space-3);">
     « Marge / jour » = (CA vendu + frais refacturés − coûts absorbés) ÷ jours
-    réellement passés, calculée sur les seuls projets assez avancés pour que
-    le chiffre veuille dire quelque chose — d'où l'étiquette « partiel » quand
-    certains projets du client en sont exclus. S'il est bien en dessous du
-    « vendu / jour », ce client te coûte plus de temps que tu ne lui en as vendu.
+    réellement passés, calculée sur les seuls projets assez avancés — d'où
+    l'étiquette « partiel » quand certains en sont exclus.
     {% if cost_day_rate %}La « marge réelle » déduit en plus
     {{ '%.0f'|format(cost_day_rate) }}{{ currency }} par jour de coût de revient.{% endif %}
   </p>
 </section>
-{% else %}
-<div class="empty">
-  <h3>Aucun client</h3>
-  <p>
-    Il n'y a pas de fiche client à créer : un client existe dès qu'un projet
-    porte son nom. Ouvre un projet, clique <strong>Modifier</strong>, et
-    remplis le champ <strong>Client</strong>. Tous les projets portant le même
-    nom seront regroupés ici.
-  </p>
-  <a href="{{ url_for('projects_list') }}" class="btn btn-ghost" style="margin-top: var(--space-4);">Voir mes projets</a>
-</div>
 {% endif %}
 {% endblock %}

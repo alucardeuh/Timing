@@ -5,10 +5,38 @@
 -- légère de db.py (voir MIGRATIONS). Ce fichier décrit l'état CIBLE du
 -- schéma ; db.py se charge d'y amener une base plus ancienne sans perte.
 
+-- Fiches clients. Avant, « client » n'était qu'un texte libre recopié sur
+-- chaque projet : une faute de frappe créait un doublon silencieux, et il
+-- n'y avait nulle part où noter un contact ou un TJM habituel.
+--
+-- projects.client conserve le NOM en clair, tenu à jour avec cette table.
+-- Cette dénormalisation assumée garde les exports, les regroupements du
+-- planning et les agrégats lisibles sans jointure supplémentaire.
+CREATE TABLE IF NOT EXISTS clients (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                TEXT NOT NULL UNIQUE,
+    contact_name        TEXT,
+    email               TEXT,
+    phone               TEXT,
+    address             TEXT,
+
+    -- Repris automatiquement à la création d'un projet pour ce client.
+    default_day_rate    REAL,
+    -- Délai de paiement contractuel, en jours. Le prévisionnel préfère le
+    -- délai réellement constaté, et se rabat sur celui-ci sans historique.
+    payment_terms_days  INTEGER,
+
+    notes               TEXT,
+    archived            INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT
+);
+
 CREATE TABLE IF NOT EXISTS projects (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT NOT NULL,
     client          TEXT,
+    client_id       INTEGER REFERENCES clients(id) ON DELETE SET NULL,
 
     -- provisional : vendu mais pas signé. N'entre dans la charge que si on
     -- demande explicitement à l'inclure, jamais dans le CA réalisé.
@@ -154,3 +182,5 @@ CREATE INDEX IF NOT EXISTS idx_milestones_status ON milestones(status);
 CREATE INDEX IF NOT EXISTS idx_costs_project ON costs(project_id);
 CREATE INDEX IF NOT EXISTS idx_absences_dates ON absences(start_date, end_date);
 CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status, archived);
+CREATE INDEX IF NOT EXISTS idx_projects_client ON projects(client_id);
+CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);

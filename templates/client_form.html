@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Modifier le client' if client else 'Nouveau client' }} — Timing{% endblock %}
+
+{% block content %}
+{% set d = form_data or client %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">{{ 'Édition' if client else 'Nouveau' }}</p>
+    <h1>{{ client.name if client and not form_data else 'Nouveau client' }}</h1>
+  </div>
+</div>
+
+<section class="card" style="max-width: 680px;">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <div class="field">
+      <label for="name">Nom du client</label>
+      <input id="name" name="name" type="text" value="{{ d.name if d else '' }}" required autofocus>
+      {% if client %}
+      <p class="field-hint">Renommer met à jour tous les projets rattachés.</p>
+      {% endif %}
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="contact_name">Contact</label>
+        <input id="contact_name" name="contact_name" type="text" value="{{ d.contact_name if d and d.contact_name else '' }}" placeholder="Prénom Nom">
+      </div>
+      <div class="field">
+        <label for="email">E-mail</label>
+        <input id="email" name="email" type="email" value="{{ d.email if d and d.email else '' }}">
+      </div>
+      <div class="field">
+        <label for="phone">Téléphone</label>
+        <input id="phone" name="phone" type="text" value="{{ d.phone if d and d.phone else '' }}">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="default_day_rate">TJM habituel ({{ currency }})</label>
+        <input id="default_day_rate" name="default_day_rate" type="number" step="10" min="0"
+               value="{{ d.default_day_rate|int if d and d.default_day_rate else '' }}">
+        <p class="field-hint">Repris automatiquement à la création d'un projet pour ce client, si tu laisses le TJM vide.</p>
+      </div>
+      <div class="field">
+        <label for="payment_terms_days">Délai de paiement (jours)</label>
+        <input id="payment_terms_days" name="payment_terms_days" type="number" step="1" min="0"
+               value="{{ d.payment_terms_days|int if d and d.payment_terms_days else '' }}">
+        <p class="field-hint">Le prévisionnel d'encaissement préfère le délai réellement constaté ; il se rabat sur celui-ci tant qu'aucune facture n'a été payée.</p>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="address">Adresse</label>
+      <textarea id="address" name="address" rows="2">{{ d.address if d and d.address else '' }}</textarea>
+    </div>
+
+    <div class="field">
+      <label for="notes">Notes</label>
+      <textarea id="notes" name="notes" rows="3" placeholder="Interlocuteurs, conditions particulières, historique…">{{ d.notes if d and d.notes else '' }}</textarea>
+    </div>
+
+    <div class="btn-row">
+      <button type="submit" class="btn btn-primary">{{ 'Enregistrer' if client else 'Créer le client' }}</button>
+      <a href="{{ url_for('client_detail', client_id=client.id) if client else url_for('clients') }}" class="btn btn-ghost">Annuler</a>
+    </div>
+  </form>
+</section>
+
+{% if client %}
+<section class="card section-gap" style="max-width: 680px;">
+  <div class="card-title-row"><h3>Supprimer la fiche</h3></div>
+  <p class="muted">
+    Les projets rattachés sont conservés et gardent « {{ client.name }} » comme
+    nom de client : supprimer un contact ne doit pas effacer l'historique de
+    facturation qui s'y rattache.
+  </p>
+  <form method="post" action="{{ url_for('delete_client', client_id=client.id) }}"
+        onsubmit="return confirm('Supprimer la fiche de {{ client.name }} ?');" style="margin-top: var(--space-3);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn-danger btn-sm">Supprimer la fiche</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

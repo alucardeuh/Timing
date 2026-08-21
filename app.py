@@ -175,7 +175,31 @@ def req_text(form, field, label, max_len=200):
     return value[:max_len]
 
 
+def resolve_client(form):
+    """Renvoie (client_id, nom) à partir du formulaire projet.
+
+    Trois cas : une fiche choisie dans la liste, un nom tapé librement
+    (fiche créée ou retrouvée), ou rien du tout.
+    """
+    typed = (form.get("client_new") or form.get("client") or "").strip()[:120]
+    if typed:
+        return db.ensure_client(typed), typed
+
+    raw = (form.get("client_id") or "").strip()
+    if raw.isdigit():
+        record = db.get_client(int(raw))
+        if record:
+            return record["id"], record["name"]
+    return None, ""
+
+
 def parse_project_form(form):
+    # Le projet se rattache à une fiche client. Le champ texte reste accepté :
+    # y taper un nom inconnu crée la fiche à la volée, plutôt que d'imposer
+    # un aller-retour par la page Clients. Résolu en premier, car le TJM
+    # habituel du client sert de repli plus bas.
+    client_id, client_name = resolve_client(form)
+
     days_per_week = req_float(form, "days_per_week", "Jours / semaine", minimum=0.1, maximum=7)
     duration_value = req_float(form, "duration_value", "Durée", minimum=0.1)
     duration_unit = req_choice(form, "duration_unit", "Unité de durée", ("weeks", "months"), "weeks")
@@ -190,11 +214,19 @@ def parse_project_form(form):
         "duration_value": duration_value,
         "duration_unit": duration_unit,
     })
+    # TJM habituel du client, repris quand le champ est laissé vide : c'est
+    # la raison d'être d'une fiche client plutôt qu'un simple nom.
+    if not day_rate and price_total in (None, 0) and client_id:
+        record = db.get_client(client_id)
+        if record and record["default_day_rate"]:
+            day_rate = record["default_day_rate"]
+
     day_rate, price_total = calc.resolve_price(day_rate, price_total, total_days)
 
     return {
         "name": req_text(form, "name", "Nom du projet"),
-        "client": (form.get("client") or "").strip()[:120],
+        "client": client_name,
+        "client_id": client_id,
         "status": status,
         "days_per_week": days_per_week,
         "duration_value": duration_value,
@@ -736,17 +768,26 @@ def projects_list():
 
 @app.route("/projects/new", methods=["GET", "POST"])
 def new_project():
+    # Arrivée depuis une fiche client : le client est présélectionné.
+    try:
+        preset = int(request.args.get("client_id") or 0) or None
+    except ValueError:
+        preset = None
+
     if request.method == "POST":
         try:
             data = parse_project_form(request.form)
         except FormError as exc:
             flash(str(exc), "error")
-            return render_template("project_form.html", project=None, form_data=request.form, known_clients=db.list_clients())
+            return render_template("project_form.html", project=None, form_data=request.form,
+                                   known_clients=db.list_client_records(),
+                                   selected_client_id=preset)
         data["color"] = db.next_project_color()
         project_id = db.create_project(data)
         flash("Projet créé.", "success")
         return redirect(url_for("project_detail", project_id=project_id))
-    return render_template("project_form.html", project=None, form_data=None, known_clients=db.list_clients())
+    return render_template("project_form.html", project=None, form_data=None,
+                           known_clients=db.list_client_records(), selected_client_id=preset)
 
 
 @app.route("/projects/<int:project_id>")
@@ -807,7 +848,9 @@ def edit_project(project_id):
             data = parse_project_form(request.form)
         except FormError as exc:
             flash(str(exc), "error")
-            return render_template("project_form.html", project=project, form_data=request.form, known_clients=db.list_clients())
+            return render_template("project_form.html", project=project, form_data=request.form,
+                                   known_clients=db.list_client_records(),
+                                   selected_client_id=project["client_id"])
         changed = db.update_project(project_id, data,
                                     scope_note=(request.form.get("scope_note") or ""))
         if changed:
@@ -816,7 +859,9 @@ def edit_project(project_id):
         else:
             flash("Projet mis à jour.", "success")
         return redirect(url_for("project_detail", project_id=project_id))
-    return render_template("project_form.html", project=project, form_data=None, known_clients=db.list_clients())
+    return render_template("project_form.html", project=project, form_data=None,
+                           known_clients=db.list_client_records(),
+                           selected_client_id=project["client_id"])
 
 
 @app.route("/projects/<int:project_id>/status", methods=["POST"])
@@ -942,7 +987,8 @@ def billing():
     )
 
     delays = db.payment_delays()
-    forecast = calc.cash_forecast(db.open_milestones(), delays, months=3, today=today)
+    forecast = calc.cash_forecast(db.open_milestones(), delays, months=3, today=today,
+                                  contractual=db.contractual_delays())
     monthly = db.monthly_invoiced(12)
 
     return render_template(
@@ -1053,11 +1099,99 @@ def delete_cost(cost_id):
 def clients():
     settings = current_settings()
     rows = project_rows(db.list_projects(), settings)
+    rollup = {c["client"]: c for c in calc.client_rollup(rows, db.milestone_totals_by_project(), settings)}
+    records = db.list_client_records()
+    delays = db.payment_delays()
+
     return render_template(
-        "clients.html",
+        "clients.html", records=records, rollup=rollup, delays=delays,
         clients=calc.client_rollup(rows, db.milestone_totals_by_project(), settings),
         cost_day_rate=calc.cost_day_rate(settings),
     )
+
+
+def parse_client_form(form):
+    return {
+        "name": req_text(form, "name", "Nom du client", 120),
+        "contact_name": (form.get("contact_name") or "").strip()[:120] or None,
+        "email": (form.get("email") or "").strip()[:160] or None,
+        "phone": (form.get("phone") or "").strip()[:40] or None,
+        "address": (form.get("address") or "").strip() or None,
+        "default_day_rate": opt_float(form, "default_day_rate", "TJM habituel", minimum=0),
+        "payment_terms_days": (int(opt_float(form, "payment_terms_days",
+                                             "Délai de paiement", minimum=0) or 0) or None),
+        "notes": (form.get("notes") or "").strip() or None,
+    }
+
+
+@app.route("/clients/new", methods=["GET", "POST"])
+def new_client():
+    if request.method == "POST":
+        try:
+            data = parse_client_form(request.form)
+            if db.get_client_by_name(data["name"]):
+                raise FormError(f"Un client nommé « {data['name']} » existe déjà.")
+            client_id = db.create_client(data)
+        except FormError as exc:
+            flash(str(exc), "error")
+            return render_template("client_form.html", client=None, form_data=request.form)
+        flash("Client créé.", "success")
+        return redirect(url_for("client_detail", client_id=client_id))
+    return render_template("client_form.html", client=None, form_data=None)
+
+
+@app.route("/clients/<int:client_id>")
+def client_detail(client_id):
+    client = db.get_client(client_id)
+    if not client:
+        abort(404)
+    settings = current_settings()
+    projects = db.client_projects(client_id)
+    rows = project_rows(projects, settings)
+    rollup = calc.client_rollup(rows, db.milestone_totals_by_project(), settings)
+    stats = rollup[0] if rollup else None
+    delay = db.payment_delays().get(client["name"])
+
+    return render_template(
+        "client_detail.html", client=client, rows=rows, stats=stats, delay=delay,
+        cost_day_rate=calc.cost_day_rate(settings),
+        milestones=[m for m in db.list_milestones() if m["project_client"] == client["name"]],
+    )
+
+
+@app.route("/clients/<int:client_id>/edit", methods=["GET", "POST"])
+def edit_client(client_id):
+    client = db.get_client(client_id)
+    if not client:
+        abort(404)
+    if request.method == "POST":
+        try:
+            data = parse_client_form(request.form)
+            existing = db.get_client_by_name(data["name"])
+            if existing and existing["id"] != client_id:
+                raise FormError(f"Un autre client porte déjà le nom « {data['name']} ».")
+            db.update_client(client_id, data)
+        except FormError as exc:
+            flash(str(exc), "error")
+            return render_template("client_form.html", client=client, form_data=request.form)
+        flash("Client mis à jour.", "success")
+        return redirect(url_for("client_detail", client_id=client_id))
+    return render_template("client_form.html", client=client, form_data=None)
+
+
+@app.route("/clients/<int:client_id>/delete", methods=["POST"])
+def delete_client(client_id):
+    client = db.get_client(client_id)
+    if not client:
+        abort(404)
+    count = len(db.client_projects(client_id))
+    db.delete_client(client_id)
+    if count:
+        flash(f"Fiche supprimée. Les {count} projet(s) rattaché(s) sont conservés "
+              f"et gardent le nom « {client['name'] }».", "success")
+    else:
+        flash("Client supprimé.", "success")
+    return redirect(url_for("clients"))
 
 
 # ------------------------------------------------------------- comparatif

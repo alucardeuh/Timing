@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}{{ client.name }} — Timing{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Client</p>
+    <h1>{{ client.name }}</h1>
+  </div>
+  <div class="btn-row">
+    <a href="{{ url_for('edit_client', client_id=client.id) }}" class="btn btn-ghost btn-sm">Modifier</a>
+    <a href="{{ url_for('new_project', client_id=client.id) }}" class="btn btn-primary btn-sm">+ Projet pour ce client</a>
+  </div>
+</div>
+
+{% if client.contact_name or client.email or client.phone or client.address %}
+<section class="card">
+  <div class="card-title-row"><h3>Coordonnées</h3></div>
+  <ul class="plain-list">
+    {% if client.contact_name %}<li>{{ client.contact_name }}</li>{% endif %}
+    {% if client.email %}<li><a href="mailto:{{ client.email }}">{{ client.email }}</a></li>{% endif %}
+    {% if client.phone %}<li class="mono">{{ client.phone }}</li>{% endif %}
+    {% if client.address %}<li class="notes-body">{{ client.address }}</li>{% endif %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="card {{ 'section-gap' if client.contact_name or client.email }}">
+  <div class="card-title-row"><h3>Chiffres</h3></div>
+  {% if stats %}
+  <div class="stat-strip">
+    <div class="stat"><div class="stat-num">{{ stats.projects }}</div><div class="stat-label">Projets</div></div>
+    <div class="stat"><div class="stat-num">{{ '{:,.0f}'.format(stats.revenue)|replace(',', ' ') }}{{ currency }}</div><div class="stat-label">CA vendu</div></div>
+    <div class="stat"><div class="stat-num">{{ '{:,.0f}'.format(stats.invoiced)|replace(',', ' ') }}{{ currency }}</div><div class="stat-label">Facturé</div></div>
+    <div class="stat"><div class="stat-num">{{ stats.days_spent }}</div><div class="stat-label">Jours passés</div></div>
+    <div class="stat">
+      <div class="stat-num">{% if stats.sold_day_rate %}{{ '%.0f'|format(stats.sold_day_rate) }}{{ currency }}{% else %}—{% endif %}</div>
+      <div class="stat-label">Vendu / jour</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">{% if stats.real_day_rate %}{{ '%.0f'|format(stats.real_day_rate) }}{{ currency }}{% else %}—{% endif %}</div>
+      <div class="stat-label">Marge / jour</div>
+      {% if stats.partial %}<div class="faint">calcul partiel</div>{% endif %}
+    </div>
+    {% if cost_day_rate and stats.real_margin is not none %}
+    <div class="stat">
+      <div class="stat-num {{ 'negative-num' if stats.real_margin < 0 }}">{{ '%.0f'|format(stats.real_margin) }}{{ currency }}</div>
+      <div class="stat-label">Marge réelle</div>
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="faint">Aucun projet rattaché pour l'instant.</p>
+  {% endif %}
+
+  <p class="faint" style="margin-top: var(--space-3);">
+    {% if delay %}
+      Ce client paie en moyenne <strong class="mono">{{ delay.days }} jours</strong>
+      après facturation, sur {{ delay.samples }} facture{{ 's' if delay.samples > 1 }} encaissée{{ 's' if delay.samples > 1 }}.
+    {% elif client.payment_terms_days %}
+      Aucune facture encaissée pour l'instant : le prévisionnel applique le
+      délai contractuel de {{ client.payment_terms_days }} jours.
+    {% else %}
+      Aucun historique de paiement : le prévisionnel applique 30 jours par défaut.
+    {% endif %}
+  </p>
+</section>
+
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Projets</h3></div>
+  {% if rows %}
+  <div class="grid-scroll">
+    <table class="entries">
+      <thead><tr><th>Projet</th><th>Statut</th><th>Début</th><th>Consommé</th><th>Prix</th><th>Facturé</th></tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td><a href="{{ url_for('project_detail', project_id=row.project.id) }}" class="cell-link">
+            <span class="pcard-color-dot" style="background:{{ row.project.color }};"></span>
+            <span class="cell-strong">{{ row.project.name }}</span></a></td>
+          <td><span class="pill pill-{{ row.project.status }}">{{ status_label[row.project.status] }}</span></td>
+          <td class="mono">{{ row.project.start_date }}</td>
+          <td class="mono">{{ row.stats.pct_consumed }}%</td>
+          <td class="mono">{{ '%.0f'|format(row.project.price_total) }}{{ currency }}</td>
+          <td class="mono">{{ '%.0f'|format(row.stats.invoiced) }}{{ currency }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty" style="padding: var(--space-5) 0;">
+    <p class="muted">Aucun projet pour ce client.</p>
+    <a href="{{ url_for('new_project', client_id=client.id) }}" class="btn btn-ghost" style="margin-top: var(--space-3);">Créer le premier projet</a>
+  </div>
+  {% endif %}
+</section>
+
+{% if milestones %}
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Facturation</h3><a href="{{ url_for('billing') }}" class="faint">tout →</a></div>
+  <table class="entries">
+    <thead><tr><th>Jalon</th><th>Projet</th><th>Montant</th><th>Échéance</th><th>Statut</th></tr></thead>
+    <tbody>
+      {% for m in milestones %}
+      <tr>
+        <td>{{ m.label }}</td>
+        <td>{{ m.project_name }}</td>
+        <td class="mono">{{ '%.0f'|format(m.amount) }}{{ currency }}</td>
+        <td class="mono">{{ m.due_date or '—' }}</td>
+        <td><span class="pill pill-ms-{{ m.status }}">{{ milestone_label[m.status] }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if client.notes %}
+<section class="card section-gap">
+  <h3>Notes</h3>
+  <p class="notes-body">{{ client.notes }}</p>
+</section>
+{% endif %}
+{% endblock %}

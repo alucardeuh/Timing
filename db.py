@@ -92,6 +92,7 @@ MIGRATIONS = [
     ("entries", "hours", "REAL NOT NULL DEFAULT 0"),
     ("costs", "billable", "INTEGER NOT NULL DEFAULT 0"),
     ("projects", "weekdays", "TEXT"),
+    ("projects", "client_id", "INTEGER REFERENCES clients(id) ON DELETE SET NULL"),
 ]
 
 
@@ -127,6 +128,7 @@ def init_db():
     tables_sql, _, indexes_sql = SCHEMA_PATH.read_text(encoding="utf-8").partition("-- @INDEXES")
     conn.executescript(tables_sql)
     _apply_migrations(conn)
+    _backfill_clients(conn)
     if indexes_sql.strip():
         conn.executescript(indexes_sql)
 
@@ -143,6 +145,34 @@ def _apply_migrations(conn):
             continue  # table pas encore créée sur cette base
         if column not in existing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
+def _backfill_clients(conn):
+    """Crée une fiche pour chaque nom de client déjà saisi sur un projet.
+
+    Migration de données, pas de schéma : les noms vivaient uniquement en
+    texte libre sur les projets. Sans ce rattrapage, ouvrir la page Clients
+    après mise à jour donnerait une liste vide alors que les projets, eux,
+    affichent toujours leurs clients.
+
+    Idempotent : ne touche qu'aux projets dont client_id est encore NULL.
+    """
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(projects)")}
+    if "client_id" not in columns:
+        return
+    orphans = conn.execute(
+        "SELECT DISTINCT TRIM(client) AS name FROM projects "
+        "WHERE client_id IS NULL AND client IS NOT NULL AND TRIM(client) != ''"
+    ).fetchall()
+    for row in orphans:
+        name = row["name"]
+        conn.execute(
+            "INSERT OR IGNORE INTO clients (name, created_at, updated_at) VALUES (?,?,?)",
+            (name, now_iso(), now_iso()),
+        )
+        client = conn.execute("SELECT id FROM clients WHERE name = ?", (name,)).fetchone()
+        conn.execute("UPDATE projects SET client_id = ? WHERE client_id IS NULL AND TRIM(client) = ?",
+                     (client["id"], name))
 
 
 # --------------------------------------------------------------- réglages
@@ -229,8 +259,11 @@ def get_project(project_id):
 
 
 def list_clients():
-    """Clients distincts avec leur nombre de projets — alimente le filtre
-    et la page Clients. Les projets sans client sont regroupés sous ''."""
+    """Noms de clients présents sur des projets, avec leur nombre.
+
+    Alimente le filtre de la liste de projets. Distinct de list_client_records
+    qui, lui, renvoie les fiches — y compris celles sans aucun projet.
+    """
     conn = get_db()
     rows = conn.execute(
         "SELECT COALESCE(client, '') AS client, COUNT(*) AS n "
@@ -240,14 +273,128 @@ def list_clients():
     return [dict(r) for r in rows]
 
 
+# ---------------------------------------------------------- fiches clients
+
+def list_client_records(include_archived=False):
+    """Fiches clients avec le nombre de projets rattachés.
+
+    Un client fraîchement créé, sans projet, doit apparaître : c'est tout
+    l'intérêt de pouvoir le saisir à l'avance.
+    """
+    conn = get_db()
+    sql = ("SELECT c.*, "
+           "(SELECT COUNT(*) FROM projects p WHERE p.client_id = c.id AND p.archived = 0) AS projects_count "
+           "FROM clients c")
+    if not include_archived:
+        sql += " WHERE c.archived = 0"
+    sql += " ORDER BY c.name COLLATE NOCASE"
+    rows = conn.execute(sql).fetchall()
+    conn.close()
+    return rows
+
+
+def get_client(client_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def get_client_by_name(name):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM clients WHERE name = ? COLLATE NOCASE",
+                       ((name or "").strip(),)).fetchone()
+    conn.close()
+    return row
+
+
+def create_client(data):
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO clients (name, contact_name, email, phone, address, "
+        "default_day_rate, payment_terms_days, notes, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (data["name"], data.get("contact_name"), data.get("email"), data.get("phone"),
+         data.get("address"), data.get("default_day_rate"), data.get("payment_terms_days"),
+         data.get("notes"), now_iso(), now_iso()),
+    )
+    client_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return client_id
+
+
+def ensure_client(name):
+    """Renvoie l'id du client portant ce nom, en le créant au besoin.
+
+    Le rapprochement est insensible à la casse : « Alpha SA » et « alpha sa »
+    ne doivent pas produire deux fiches.
+    """
+    name = (name or "").strip()
+    if not name:
+        return None
+    existing = get_client_by_name(name)
+    if existing:
+        return existing["id"]
+    return create_client({"name": name})
+
+
+def update_client(client_id, data):
+    """Met à jour une fiche et propage le nom sur tous ses projets.
+
+    projects.client garde le nom en clair ; le renommer d'un côté sans
+    l'autre ferait diverger la page Clients et le reste de l'app.
+    """
+    conn = get_db()
+    conn.execute(
+        "UPDATE clients SET name=?, contact_name=?, email=?, phone=?, address=?, "
+        "default_day_rate=?, payment_terms_days=?, notes=?, updated_at=? WHERE id=?",
+        (data["name"], data.get("contact_name"), data.get("email"), data.get("phone"),
+         data.get("address"), data.get("default_day_rate"), data.get("payment_terms_days"),
+         data.get("notes"), now_iso(), client_id),
+    )
+    conn.execute("UPDATE projects SET client = ? WHERE client_id = ?", (data["name"], client_id))
+    conn.commit()
+    conn.close()
+
+
+def set_client_archived(client_id, archived=True):
+    conn = get_db()
+    conn.execute("UPDATE clients SET archived = ?, updated_at = ? WHERE id = ?",
+                 (1 if archived else 0, now_iso(), client_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_client(client_id):
+    """Supprime la fiche. Les projets sont conservés et gardent le nom du
+    client en clair : supprimer un contact ne doit pas effacer l'historique
+    de facturation qui s'y rattache."""
+    conn = get_db()
+    conn.execute("DELETE FROM clients WHERE id = ?", (client_id,))
+    conn.commit()
+    conn.close()
+
+
+def client_projects(client_id):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM projects WHERE client_id = ? AND archived = 0 "
+        "ORDER BY start_date DESC", (client_id,)
+    ).fetchall()
+    conn.close()
+    return rows
+
+
 def create_project(data):
     conn = get_db()
     cur = conn.execute(
-        "INSERT INTO projects (name, client, status, days_per_week, duration_value, "
+        "INSERT INTO projects (name, client, client_id, status, days_per_week, duration_value, "
         "duration_unit, day_rate, price_total, hours_per_day, start_date, weekdays, "
-        "color, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "color, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
-            data["name"], data["client"], data["status"], data["days_per_week"],
+            data["name"], data["client"], data.get("client_id"),
+            data["status"], data["days_per_week"],
             data["duration_value"], data["duration_unit"], data["day_rate"],
             data["price_total"], data["hours_per_day"], data["start_date"],
             data.get("weekdays") or None,
@@ -289,11 +436,12 @@ def update_project(project_id, data, scope_note=""):
     changed = []
     conn = get_db()
     conn.execute(
-        "UPDATE projects SET name=?, client=?, status=?, days_per_week=?, duration_value=?, "
-        "duration_unit=?, day_rate=?, price_total=?, hours_per_day=?, start_date=?, "
-        "weekdays=?, notes=?, updated_at=? WHERE id=?",
+        "UPDATE projects SET name=?, client=?, client_id=?, status=?, days_per_week=?, "
+        "duration_value=?, duration_unit=?, day_rate=?, price_total=?, hours_per_day=?, "
+        "start_date=?, weekdays=?, notes=?, updated_at=? WHERE id=?",
         (
-            data["name"], data["client"], data["status"], data["days_per_week"],
+            data["name"], data["client"], data.get("client_id"),
+            data["status"], data["days_per_week"],
             data["duration_value"], data["duration_unit"], data["day_rate"],
             data["price_total"], data["hours_per_day"], data["start_date"],
             data.get("weekdays") or None, data["notes"], now_iso(), project_id,
@@ -1011,6 +1159,7 @@ def duplicate_project(project_id, start_date=None):
     data = {
         "name": f"{source['name']} — reconduction",
         "client": source["client"],
+        "client_id": source["client_id"],
         "status": "provisional",
         "days_per_week": source["days_per_week"],
         "duration_value": source["duration_value"],
@@ -1064,6 +1213,20 @@ def payment_delays():
         by_client.setdefault(r["client"] or "Sans client", []).append(r["delay"])
     return {name: {"days": round(sum(v) / len(v), 1), "samples": len(v)}
             for name, v in by_client.items()}
+
+
+def contractual_delays():
+    """Délai de paiement contractuel par client, depuis les fiches.
+
+    Sert de repli au prévisionnel quand aucune facture n'a encore été
+    encaissée : mieux vaut la valeur négociée que 30 jours arbitraires.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT name, payment_terms_days FROM clients WHERE payment_terms_days IS NOT NULL"
+    ).fetchall()
+    conn.close()
+    return {r["name"]: r["payment_terms_days"] for r in rows}
 
 
 def open_milestones():
