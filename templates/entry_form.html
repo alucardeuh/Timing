@@ -11,6 +11,7 @@
 
 <section class="card" style="max-width: 620px;">
   <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="field-row">
       <div class="field">
         <label for="entry_date">Date</label>

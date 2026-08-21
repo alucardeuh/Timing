@@ -47,14 +47,26 @@ mettent la capacité à zéro sur la période.
 **3. Un indice de rentabilité n'est affiché que s'il veut dire quelque chose.**
 Le rapport prix / temps passé sur une demi-journée saisie donne un taux
 spectaculaire et faux. En dessous du seuil de consommation réglé (20 % par
-défaut), l'indice reste masqué. L'**indice projeté**, lui, extrapole le
-rythme observé jusqu'à la fin du projet et reste lisible tôt.
+défaut), ni l'indice **ni aucun taux réel** ne sont affichés — ils partagent
+le même dénominateur, donc le même défaut. L'**indice projeté** extrapole le
+rythme observé, mais reste muet tant que moins de 10 % du temps est écoulé
+ou qu'il y a moins de trois saisies : divisé par un temps écoulé quasi nul,
+il était encore plus volatil que celui qu'il remplace.
+
+**Un quatrième principe** s'y est ajouté : *la charge suit le réel, pas le
+contrat*. Un projet non terminé continue d'occuper des journées au-delà de sa
+fin prévue, dans la limite réglable de 4 semaines, et le signale
+distinctement. Une carte purement contractuelle affichait 0 % de charge
+précisément quand un projet en dépassement mangeait les journées à venir.
 
 ## Les pages
 
 - **Aujourd'hui** (`/`) — alertes à traiter, saisie rapide, carte de charge
   sur 8 semaines, chiffre d'affaires du mois et de l'année vs objectifs,
   carnet de commandes, classement de rentabilité, cartes projets.
+- **Jour** (`/jour`) — une carte par projet, un grand champ de pourcentage,
+  boutons 25/50/75/100 %, navigation veille / lendemain. Pensée pour le
+  téléphone, là où la grille hebdo et ses neuf colonnes ne passent pas.
 - **Semaine** (`/semaine`) — grille de saisie : projets en lignes,
   lundi→dimanche en colonnes, totaux par jour et par ligne. Les flèches haut
   et bas naviguent d'une ligne à l'autre. Une case vide ou à 0 supprime la
@@ -71,7 +83,10 @@ rythme observé jusqu'à la fin du projet et reste lisible tôt.
   historique paginé avec **modification** de chaque saisie, et historique de
   périmètre.
 - **Facturation** (`/facturation`) — jalons en trois colonnes (à facturer,
-  facturé, encaissé), retards en tête, CA facturé par mois.
+  facturé, encaissé), retards en tête, CA facturé par mois, et
+  **prévisionnel d'encaissement** sur trois mois basé sur le délai de
+  paiement réellement constaté par client. Les jalons sont modifiables et
+  leur date de facturation antidatable.
 - **Clients** (`/clients`) — CA par client, part de chacun dans ton activité
   (alerte au-delà de 50 %), et marge par jour réellement passé par client.
 - **Comparatif** (`/comparatif`) — rentabilité de tous les projets, temps par
@@ -91,23 +106,43 @@ Facturation. Chaque jalon passe de « à facturer » à « facturé » (avec un
 numéro de facture) puis « encaissé ». C'est ce qui alimente le CA mensuel,
 les objectifs et le carnet de commandes.
 
-**Coûts directs.** Sous-traitance, licences, déplacements. Ils sont déduits
-du prix pour calculer la marge par jour : sans eux, l'indicateur mesure ta
-productivité, pas ta rentabilité.
+**Coûts directs.** Sous-traitance, licences, déplacements. Déduits du prix
+par défaut ; cochés « refacturé au client », ils s'y **ajoutent** à la place.
+
+**Coût de revient.** Charges fixes annuelles ÷ jours facturables visés = ce
+que coûte une journée de ton temps. Tant que ce réglage est vide, la fiche
+projet affiche « net de coûts directs » et non « marge » : le premier ignore
+le coût de ton propre temps et ne dit donc pas si tu gagnes de l'argent,
+seulement si tu tiens ton budget de jours. Renseigné, il débloque la marge
+réelle par projet et par client, ainsi que le seuil de rentabilité annuel sur
+l'accueil.
 
 **Historique de périmètre.** Modifier les jours/semaine, la durée ou le prix
 d'un projet enregistre l'ancienne valeur avec un motif. C'est ce qui permet
 d'analyser ses dépassements après coup, au lieu d'écraser le contrat initial.
 
-**Alertes.** Budget dépassé, cadence en retard, projet qui se termine sous
-15 jours, jalon à facturer en retard, facture non encaissée depuis plus de
-30 jours, jours en surcharge, jours ouvrés sans saisie.
+**Alertes.** Budget dépassé, cadence en retard, projet prolongé au-delà de sa
+fin prévue, projet qui se termine sous 15 jours, jalon à facturer en retard,
+facture non encaissée depuis plus de 30 jours, jours en surcharge, jours
+ouvrés sans saisie — cette dernière se clôt en un clic par « rien fait ce
+jour-là », qui déclare une indisponibilité.
+
+**Cadence.** Quatre niveaux sur une échelle symétrique : en avance
+(delta < −10), dans les clous (−10 à 10), tendu (10 à 25), en retard (> 25),
+où delta est l'écart entre budget consommé et temps écoulé. Plus un état
+« pas commencé » distinct.
 
 ## Sauvegarder
 
-Réglages → Sauvegarde et export. Trois exports CSV (saisies, projets,
-facturation) et une **sauvegarde complète** : une copie du fichier SQLite,
-la seule qui restaure absolument tout.
+Réglages → Sauvegarde et export. Quatre exports CSV (saisies, projets,
+facturation, à facturer) et une **sauvegarde complète**, produite par
+`sqlite3.backup()` : en mode WAL, copier le fichier principal seul aurait
+donné une sauvegarde en retard sur la base réelle.
+
+L'export « à facturer » est volontairement plat et complet. C'est le format
+qui survivra à la facturation électronique obligatoire (réception au
+1er septembre 2026, émission au format structuré pour les TPE au
+1er septembre 2027) — un générateur de PDF maison serait hors-jeu d'ici là.
 
 ## Tests
 
@@ -116,10 +151,14 @@ pip install pytest
 python3 -m pytest tests/ -q
 ```
 
-38 tests sur les calculs et la couche données : capacité, rentabilité,
+68 tests sur les calculs et la couche données : capacité en jours ouvrés,
+dépassement, rentabilité et garde-fous de fiabilité, coût de revient,
 indépendance des jours vis-à-vis du réglage horaire, détection des jours non
-saisis, validation des statuts, corbeille, grille hebdo, et migration d'une base créée
-par la V1 (données conservées, colonnes ajoutées, relances idempotentes).
+saisis, validation des statuts, corbeille, grille hebdo (dates, atomicité,
+lignes d'affichage), jeton CSRF et redirections, prévisionnel d'encaissement,
+coûts refacturables, et migration d'une base créée par la V1.
+
+Chaque test documente en commentaire le bug qu'il empêche de revenir.
 
 ## Structure
 
@@ -129,7 +168,7 @@ calculations.py     logique métier pure, sans Flask ni sqlite3
 db.py               tout le SQL, migrations automatiques, agrégats
 schema.sql          état cible du schéma
 templates/          pages Jinja2
-static/             CSS (thème blanc) + JS sans framework
+static/             CSS (thème blanc), JS sans framework, manifeste PWA
 tests/              suite pytest
 ```
 

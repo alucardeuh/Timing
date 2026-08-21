@@ -22,6 +22,14 @@
       {% else %}
         <a href="{{ url_for(a.url_name) }}">{{ a.text }}</a>
       {% endif %}
+      {% if a.dismiss_day %}
+      <form method="post" action="{{ url_for('mark_day_off') }}" class="inline-form alert-action">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="date" value="{{ a.dismiss_day }}">
+        <input type="hidden" name="next" value="{{ url_for('dashboard') }}">
+        <button type="submit" class="btn btn-ghost btn-sm">rien fait le {{ a.dismiss_day[8:] }}/{{ a.dismiss_day[5:7] }}</button>
+      </form>
+      {% endif %}
     </li>
     {% endfor %}
   </ul>
@@ -29,9 +37,30 @@
 {% endif %}
 
 <section class="card {{ 'section-gap' if alerts }}">
-  <div class="card-title-row"><h3>Saisir du temps</h3></div>
+  <div class="card-title-row"><h3>Saisir du temps</h3>
+    <a href="{{ url_for('day_view') }}" class="faint">vue jour →</a>
+  </div>
+  {% if last_project %}
+  <div class="oneshot">
+    <span class="oneshot-label">
+      {{ last_project.name }} — aujourd'hui
+      {% if logged_today_pct %}<span class="mono">({{ logged_today_pct|int }}% déjà saisi)</span>{% endif %}
+    </span>
+    {% for v in [25, 50, 75, 100] %}
+    <form method="post" action="{{ url_for('create_entry') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="project_id" value="{{ last_project.id }}">
+      <input type="hidden" name="percent_of_day" value="{{ v }}">
+      <input type="hidden" name="entry_date" value="{{ today }}">
+      <input type="hidden" name="next" value="{{ url_for('dashboard') }}">
+      <button type="submit" class="btn btn-ghost btn-sm">{{ v }}%</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% if loggable %}
   <form class="quick-add" method="post" action="{{ url_for('create_entry') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="next" value="{{ url_for('dashboard') }}">
     <div class="field field-project">
       <label for="qa-project">Projet</label>
@@ -89,7 +118,7 @@
 
   <div class="capacity-strip">
     {% for day in capacity %}
-    <div class="day-cell level-{{ day.level }} {{ 'has-provisional' if day.has_provisional }} {{ 'is-today' if day.date.isoformat() == today }}"
+    <div class="day-cell level-{{ day.level }} {{ 'has-provisional' if day.has_provisional }} {{ 'has-overrun' if day.has_overrun }} {{ 'is-today' if day.date.isoformat() == today }}"
          data-date="{{ day.date.strftime('%a %d %b') }}"
          data-pct="{{ day.pct_total }}"
          data-off="{{ day.off_reason or '' }}"
@@ -103,6 +132,7 @@
     <span><span class="swatch" style="background: var(--load-heavy-bg); border:1px solid var(--load-heavy);"></span>chargé</span>
     <span><span class="swatch" style="background: var(--load-storm-bg); border:1px solid var(--load-storm);"></span>tempête</span>
     <span><span class="swatch swatch-off"></span>non travaillé</span>
+  <span><span class="swatch swatch-overrun"></span>projet prolongé</span>
     <span><span class="swatch swatch-hatched"></span>inclut du provisoire</span>
   </div>
 </section>
@@ -140,6 +170,23 @@
       <div class="faint">non signé, à confirmer</div>
     </div>
   </div>
+
+  {% if break_even %}
+  <div class="break-even">
+    <div class="card-title-row"><h3>Seuil de rentabilité</h3>
+      <span class="faint mono">{{ '%.0f'|format(break_even.cost_day_rate) }}{{ currency }} / jour de coût de revient</span>
+    </div>
+    <div class="goal-track goal-lg">
+      <div class="goal-fill" style="width: {{ [break_even.pct, 100]|min }}%;"></div>
+    </div>
+    <p class="faint">
+      {{ break_even.days_done }} jours travaillés cette année sur les
+      {{ break_even.days_needed }} visés pour couvrir
+      {{ '%.0f'|format(break_even.annual_fixed_costs) }}{{ currency }} de charges fixes
+      ({{ break_even.pct }}%).
+    </p>
+  </div>
+  {% endif %}
 </section>
 
 {% if ranked %}
@@ -148,11 +195,21 @@
     <h3>Les plus rentables</h3>
     <a href="{{ url_for('comparatif') }}" class="faint">tout le comparatif →</a>
   </div>
+  <div class="rank-switch">
+    <span class="faint">trier par</span>
+    <a href="{{ url_for('dashboard', rank='margin') }}" class="{{ 'is-active' if rank_by == 'margin' }}">montant</a>
+    <a href="{{ url_for('dashboard', rank='day_rate') }}" class="{{ 'is-active' if rank_by == 'day_rate' }}">marge / jour</a>
+    <a href="{{ url_for('dashboard', rank='index') }}" class="{{ 'is-active' if rank_by == 'index' }}">indice</a>
+  </div>
   <ul class="rank-list">
     {% for r in ranked %}
     <li class="rank-row">
       <span class="rank-num">{{ '%02d'|format(loop.index) }}</span>
       <a class="rank-name" href="{{ url_for('project_detail', project_id=r.project.id) }}">{{ r.project.name }}</a>
+      <span class="rank-amount mono">
+        {% if r.real_margin is not none %}{{ '{:,.0f}'.format(r.real_margin)|replace(',', ' ') }}{{ currency }}
+        {% else %}{{ '{:,.0f}'.format(r.net)|replace(',', ' ') }}{{ currency }}{% endif %}
+      </span>
       <span class="rank-index {{ 'positive' if r.index >= 1 else 'negative' }}">×{{ '%.2f'|format(r.index) }}</span>
     </li>
     {% endfor %}
@@ -160,7 +217,8 @@
   <p class="faint" style="margin-top: var(--space-3);">
     Seuls les projets assez avancés apparaissent ici : en dessous de
     {{ settings.min_consumption_pct|int }} % de budget consommé, l'indice
-    n'est pas encore significatif.
+    n'est pas encore significatif. Le montant est affiché à côté de l'indice
+    parce qu'un ×1,8 sur 2 000 € pèse moins qu'un ×1,05 sur 40 000 €.
   </p>
 </section>
 {% endif %}

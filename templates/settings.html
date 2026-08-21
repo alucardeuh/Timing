@@ -11,6 +11,7 @@
 
 <section class="card" style="max-width: 640px;">
   <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="field">
       <label>Jours travaillés</label>
       <div class="checkbox-row">
@@ -82,6 +83,35 @@
       </div>
     </div>
 
+    <h4 class="sub-head">Coût de revient</h4>
+    <div class="field-row">
+      <div class="field">
+        <label for="annual_fixed_costs">Charges fixes annuelles ({{ currency }})</label>
+        <input id="annual_fixed_costs" name="annual_fixed_costs" type="number" step="100" min="0"
+               value="{{ settings.annual_fixed_costs|int }}">
+        <p class="field-hint">Cotisations, assurances, matériel, logiciels, comptable…</p>
+      </div>
+      <div class="field">
+        <label for="billable_days_per_year">Jours facturables visés / an</label>
+        <input id="billable_days_per_year" name="billable_days_per_year" type="number" step="5" min="1" max="366"
+               value="{{ settings.billable_days_per_year|int }}">
+        <p class="field-hint">Environ 180 pour un indépendant à temps plein.</p>
+      </div>
+    </div>
+    <p class="field-help-box">
+      Le rapport des deux donne ton <strong>coût de revient journalier</strong> :
+      ce que te coûte une journée de ton temps. Sans lui, « marge » ne veut dire
+      que « prix moins coûts directs » — un chiffre qui ignore complètement ton
+      propre temps, et qui ne dit donc pas si tu gagnes de l'argent.
+    </p>
+
+    <div class="field">
+      <label for="overrun_weeks">Prolongation maximale d'un projet (semaines)</label>
+      <input id="overrun_weeks" name="overrun_weeks" type="number" step="1" min="0" max="52"
+             value="{{ settings.overrun_weeks|int }}">
+      <p class="field-hint">Un projet non terminé continue d'occuper ta charge au-delà de sa fin prévue, dans cette limite.</p>
+    </div>
+
     <button type="submit" class="btn btn-primary">Enregistrer</button>
   </form>
 </section>
@@ -97,6 +127,7 @@
     <a href="{{ url_for('export', kind='entries') }}" class="btn btn-ghost btn-sm">Saisies (CSV)</a>
     <a href="{{ url_for('export', kind='projects') }}" class="btn btn-ghost btn-sm">Projets (CSV)</a>
     <a href="{{ url_for('export', kind='milestones') }}" class="btn btn-ghost btn-sm">Facturation (CSV)</a>
+    <a href="{{ url_for('export', kind='to-invoice') }}" class="btn btn-ghost btn-sm">À facturer (CSV)</a>
     <a href="{{ url_for('backup') }}" class="btn btn-primary btn-sm">Sauvegarde complète</a>
   </div>
 </section>

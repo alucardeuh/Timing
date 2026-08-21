@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ weekday|capitalize }} {{ day.strftime('%d/%m') }} — Timing{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">{{ weekday }} {{ day.strftime('%d %B %Y') }}</p>
+    <h1>Saisie du jour</h1>
+  </div>
+  <div class="btn-row">
+    <a href="{{ url_for('day_view', date=prev_day) }}" class="btn btn-ghost btn-sm">← veille</a>
+    <a href="{{ url_for('day_view') }}" class="btn btn-ghost btn-sm">Aujourd'hui</a>
+    <a href="{{ url_for('day_view', date=next_day) }}" class="btn btn-ghost btn-sm">lendemain →</a>
+  </div>
+</div>
+
+{% if off_reason %}
+<div class="flash flash-error">Journée non travaillée ({{ off_reason }}). Tu peux quand même saisir.</div>
+{% endif %}
+
+{% if rows %}
+<form method="post" action="{{ url_for('save_day') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="date" value="{{ day.isoformat() }}">
+
+  {% for row in rows %}
+  <section class="card day-card">
+    <div class="day-card-head">
+      <span class="pcard-color-dot" style="background:{{ row.project.color }};"></span>
+      <a href="{{ url_for('project_detail', project_id=row.project.id) }}">{{ row.project.name }}</a>
+      {% if row.project.client %}<span class="faint">{{ row.project.client }}</span>{% endif %}
+      {% if row.tagged %}<span class="tag-pill">+{{ row.tagged|int }}% par tâche</span>{% endif %}
+    </div>
+    <input class="day-input" type="number" step="5" min="0" max="300" inputmode="numeric"
+           name="day-{{ row.project.id }}" value="{{ row.pct|int if row.pct else '' }}"
+           placeholder="0" aria-label="Pourcentage pour {{ row.project.name }}">
+    <div class="day-presets">
+      {% for v in [25, 50, 75, 100] %}
+      <button type="button" class="btn btn-ghost btn-sm day-preset" data-target="day-{{ row.project.id }}" data-value="{{ v }}">{{ v }}%</button>
+      {% endfor %}
+      <button type="button" class="btn btn-ghost btn-sm day-preset" data-target="day-{{ row.project.id }}" data-value="0">effacer</button>
+    </div>
+  </section>
+  {% endfor %}
+
+  <div class="card section-gap">
+    <div class="card-title-row">
+      <h3>Total de la journée</h3>
+      <span class="mono {{ 'wg-total over' if total > 100 }}">{{ total|int }}%</span>
+    </div>
+    <button type="submit" class="btn btn-primary">Enregistrer la journée</button>
+  </div>
+</form>
+
+<p class="faint section-gap">
+  Cette vue édite la part sans tâche. Le temps déjà rattaché à une tâche
+  s'ajoute au total et se modifie depuis la fiche projet ou la
+  <a href="{{ url_for('week') }}" class="inline-link">grille hebdo</a>.
+</p>
+{% else %}
+<div class="empty">
+  <h3>Aucun projet à saisir</h3>
+  <a href="{{ url_for('new_project') }}" class="btn btn-ghost" style="margin-top: var(--space-4);">Nouveau projet</a>
+</div>
+{% endif %}
+{% endblock %}

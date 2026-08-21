@@ -56,6 +56,7 @@
         {% if trash %}
         <td>
           <form method="post" action="{{ url_for('restore_project', project_id=row.project.id) }}" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="btn btn-ghost btn-sm">Restaurer</button>
           </form>
         </td>
@@ -73,6 +74,7 @@
   <p class="muted">Retape le nom exact d'un projet de la corbeille pour l'effacer avec toutes ses saisies, tâches, jalons et coûts. Irréversible.</p>
   {% for row in rows %}
   <form method="post" action="{{ url_for('delete_project', project_id=row.project.id) }}" class="danger-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <span class="cell-strong">{{ row.project.name }}</span>
     <input name="confirm" type="text" placeholder="retape « {{ row.project.name }} »" required>
     <button type="submit" class="btn btn-danger btn-sm">Supprimer définitivement</button>

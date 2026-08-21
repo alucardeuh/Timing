@@ -59,6 +59,58 @@
 </section>
 {% endif %}
 
+<section class="card section-gap">
+  <div class="card-title-row">
+    <h3>Prévisionnel d'encaissement</h3>
+    <span class="mono faint">{{ '%.0f'|format(forecast.total) }}{{ currency }} sur 3 mois</span>
+  </div>
+
+  {% if forecast.overdue %}
+  <ul class="alert-list">
+    {% for o in forecast.overdue %}
+    <li class="alert alert-danger"><span class="alert-dot"></span>
+      {{ o.milestone.label }} — {{ o.milestone.project_name }} ·
+      <span class="mono">{{ '%.0f'|format(o.milestone.amount) }}{{ currency }}</span> ·
+      attendu le {{ o.expected }}, soit {{ o.late_days }} jour(s) de retard
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <div class="forecast-grid">
+    {% for m in forecast.months %}
+    <div class="forecast-month">
+      <div class="forecast-amount">{{ '{:,.0f}'.format(m.amount)|replace(',', ' ') }}{{ currency }}</div>
+      <div class="stat-label">{{ m.month }}</div>
+      {% if m['items'] %}
+      <ul class="forecast-items">
+        {% for item in m['items'] %}
+        <li>
+          <span>{{ item.label }} — {{ item.project }}</span>
+          <span class="mono">{{ '%.0f'|format(item.amount) }}{{ currency }}{% if item.estimated %} <span class="tag-pill">estimé</span>{% endif %}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="faint">Rien d'attendu.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <p class="faint" style="margin-top: var(--space-3);">
+    Chaque jalon est daté à sa facturation (ou à son échéance s'il reste à
+    facturer) plus le délai de paiement observé pour ce client.
+    {% if delays %}
+      Délais constatés :
+      {% for name, d in delays.items() %}{{ name }} {{ d.days }} j ({{ d.samples }} facture{{ 's' if d.samples > 1 }}){% if not loop.last %} · {% endif %}{% endfor %}.
+    {% endif %}
+    Sans historique, {{ default_delay }} jours sont appliqués par défaut —
+    les montants marqués « estimé » reposent sur une échéance, pas sur une
+    facture émise.
+  </p>
+</section>
+
 {% for key, title in [('todo', 'À facturer'), ('invoiced', 'Facturé, en attente de paiement'), ('paid', 'Encaissé')] %}
 <section class="card section-gap">
   <div class="card-title-row"><h3>{{ title }}</h3><span class="mono faint">{{ '%.0f'|format(totals[key]) }}{{ currency }}</span></div>
@@ -77,15 +129,19 @@
         <td class="row-actions">
           {% if key == 'todo' %}
           <form method="post" action="{{ url_for('milestone_status', milestone_id=m.id) }}" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="status" value="invoiced">
             <input type="hidden" name="next" value="{{ url_for('billing') }}">
-            <input type="text" name="invoice_ref" placeholder="n° facture" class="mini-input">
+            <input type="text" name="invoice_ref" placeholder="n° facture" class="mini-input" style="width:100px;">
+            <input type="date" name="dated" value="{{ today }}" class="mini-input" style="width:145px;" aria-label="Date de facturation">
             <button type="submit" class="btn btn-ghost btn-sm">Facturé</button>
           </form>
           {% elif key == 'invoiced' %}
           <form method="post" action="{{ url_for('milestone_status', milestone_id=m.id) }}" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="status" value="paid">
             <input type="hidden" name="next" value="{{ url_for('billing') }}">
+            <input type="date" name="dated" value="{{ today }}" class="mini-input" style="width:145px;" aria-label="Date d'encaissement">
             <button type="submit" class="btn btn-ghost btn-sm">Encaissé</button>
           </form>
           {% endif %}

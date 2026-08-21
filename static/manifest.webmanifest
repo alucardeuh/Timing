@@ -1,0 +1,15 @@
+{
+  "name": "Timing — charge & rentabilité",
+  "short_name": "Timing",
+  "description": "Suivi de charge et de rentabilité pour prestations vendues en jours.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FAFBFC",
+  "theme_color": "#2E8577",
+  "lang": "fr",
+  "icons": [
+    { "src": "/static/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

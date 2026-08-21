@@ -34,10 +34,22 @@ LIVE_STATUSES = {"confirmed", "paused"}
 
 # ------------------------------------------------------------------ dates
 
-def parse_date(value):
+def parse_date(value, default=None):
+    """Convertit une date ISO. Avec `default` fourni, renvoie ce défaut au
+    lieu de lever sur une valeur illisible.
+
+    Défense en profondeur : une donnée corrompue déjà présente en base ne
+    doit jamais faire tomber une page entière. La validation en entrée
+    (côté routes) reste la première ligne ; celle-ci est le filet.
+    """
     if isinstance(value, date):
         return value
-    return datetime.strptime(value, "%Y-%m-%d").date()
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        if default is not None:
+            return default
+        raise
 
 
 def week_monday(d):
@@ -108,6 +120,18 @@ def hours_sold(project, settings):
     return total_days_sold(project) * hours_per_day(project, settings)
 
 
+def resolve_price(day_rate, price_total, total_days):
+    """Arbitre entre TJM et prix total, et renvoie (day_rate, price_total).
+
+    Règle métier : le TJM prime s'il est renseigné, parce que c'est ainsi
+    qu'on vend — le prix total en découle. Elle vivait dans une route, ce
+    que la séparation des couches interdit.
+    """
+    if day_rate:
+        return day_rate, round(day_rate * total_days, 2)
+    return None, price_total if price_total is not None else 0.0
+
+
 def planned_end_date(project):
     start = parse_date(project["start_date"])
     return start + timedelta(days=round(total_weeks(project) * 7))
@@ -168,36 +192,82 @@ def days_remaining(project, agg):
 def pace_status(project, agg, today=None):
     """Cadence : compare le budget consommé au temps écoulé.
 
-    Quatre états au lieu de trois. 'not_started' est nouveau : sans lui, un
-    projet sans aucune saisie affichait "en avance", ce qui confondait
-    "je suis économe" avec "je n'ai rien saisi".
+    Échelle symétrique. L'ancienne était biaisée dans le sens rassurant —
+    le pire sens pour un outil d'alerte : `delta <= 5` renvoyait « en
+    avance », donc un projet exactement dans les clous (delta = 0)
+    s'affichait comme en avance, et un projet ayant brûlé 19 points de
+    budget de plus que le temps écoulé passait pour normal.
+
+        delta < -10      en avance
+        -10 .. 10        dans les clous
+        10 .. 25         tendu
+        > 25             en retard
     """
     if (agg.get("entries_count") or 0) == 0:
         return "not_started"
     delta = pct_consumed(project, agg) - pct_time_elapsed(project, today)
-    if delta <= 5:
+    if delta < -10:
         return "ahead"
-    if delta <= 20:
+    if delta <= 10:
         return "on_track"
+    if delta <= 25:
+        return "tight"
     return "behind"
 
 
-def projected_end_date(project, agg, today=None):
-    """Date de fin au rythme observé. None tant qu'il n'y a pas de rythme
-    mesurable (moins de deux jours d'historique)."""
+def working_days_between(start, end, settings, absence_index=None):
+    """Nombre de jours ouvrés entre deux dates incluses.
+
+    Sert de base commune aux deux projections : extrapoler sur des jours
+    calendaires alors que la consommation ne se fait que les jours ouvrés
+    donnait des projections décalées d'un facteur 7/5.
+    """
+    if end < start:
+        return 0
+    working = working_days_set(settings)
+    absence_index = absence_index or {}
+    count = 0
+    day = start
+    while day <= end:
+        if day.weekday() in working and day not in absence_index:
+            count += 1
+        day += timedelta(days=1)
+    return count
+
+
+def projected_end_date(project, agg, settings=None, today=None, absences=None):
+    """Date de fin au rythme observé, exprimée en jours ouvrés.
+
+    None tant qu'il n'y a pas de rythme mesurable.
+    """
     today = today or date.today()
     first = agg.get("first_date")
     spent = days_spent(agg)
     if not first or spent <= 0:
         return None
-    elapsed = max((today - parse_date(first)).days, 1)
-    rate = spent / elapsed
-    if rate <= 0:
+
+    if settings is None:
         return None
+    absence_index = build_absence_index(absences or [])
+    elapsed = working_days_between(parse_date(first), today, settings, absence_index)
+    if elapsed <= 0:
+        return None
+
+    rate = spent / elapsed
     remaining = total_days_sold(project) - spent
     if remaining <= 0:
         return today
-    return today + timedelta(days=round(remaining / rate))
+    needed = remaining / rate
+
+    # On avance jour par jour en ne décomptant que les jours ouvrés.
+    day, left = today, needed
+    guard = 0
+    while left > 0 and guard < 3000:
+        day += timedelta(days=1)
+        guard += 1
+        if day.weekday() in working_days_set(settings) and day not in absence_index:
+            left -= 1
+    return day
 
 
 # ------------------------------------------------------------ rentabilité
@@ -210,12 +280,19 @@ def theoretical_day_rate(project):
 
 
 def real_day_rate(project, agg, costs=0.0):
-    """Marge par jour réellement passé. Les coûts directs sont déduits :
-    sans eux, l'indicateur mesure la productivité, pas la rentabilité."""
+    """Marge par jour réellement passé.
+
+    Les coûts absorbés sont déduits, les frais refacturés ajoutés — voir
+    net_of_costs. Sans cette déduction, l'indicateur mesurerait la
+    productivité, pas la rentabilité.
+
+    Le garde-fou de fiabilité est appliqué en amont par project_stats, qui
+    est le point de décision unique.
+    """
     spent = days_spent(agg)
     if spent <= 0:
         return None
-    return round((project["price_total"] - (costs or 0)) / spent, 2)
+    return round(net_of_costs(project, costs) / spent, 2)
 
 
 def theoretical_hourly_rate(project, settings):
@@ -229,7 +306,7 @@ def real_hourly_rate(project, agg, settings, costs=0.0):
     hours = hours_spent(agg, project, settings)
     if hours <= 0:
         return None
-    return round((project["price_total"] - (costs or 0)) / hours, 2)
+    return round(net_of_costs(project, costs) / hours, 2)
 
 
 def index_is_reliable(project, agg, settings):
@@ -257,56 +334,159 @@ def rentability_index(project, agg, settings, costs=0.0):
     return round(real / theo, 3)
 
 
-def projected_rentability_index(project, agg, settings, costs=0.0):
-    """Indice projeté en fin de projet, au rythme actuel. C'est LUI qu'on
-    peut regarder en cours de route : il suppose que le rythme observé se
-    poursuit jusqu'au bout, au lieu de diviser par les seules heures déjà
-    passées (ce qui donnait ×280 sur une heure saisie)."""
+def projected_rentability_index(project, agg, settings, costs=0.0, today=None,
+                                absences=None):
+    """Indice projeté en fin de projet, au rythme actuel.
+
+    Deux garde-fous, parce que sans eux cet indice était le PLUS volatil des
+    deux au moment où on le présentait comme le plus lisible : diviser par
+    un temps écoulé de 2 % faisait basculer d'×2,88 à ×0,96 pour une
+    demi-journée saisie de plus.
+
+    - Rien tant que moins de `min_projection_elapsed_pct` du temps est
+      écoulé, ou moins de 3 saisies.
+    - Extrapolation en jours ouvrés, comme `projected_end_date`, pour que
+      les deux projections de la même page reposent sur la même base.
+    """
+    today = today or date.today()
     spent = days_spent(agg)
-    if spent <= 0 or (agg.get("entries_count") or 0) == 0:
+    if spent <= 0 or (agg.get("entries_count") or 0) < 3:
         return None
-    elapsed_pct = pct_time_elapsed(project)
-    if elapsed_pct <= 0:
+
+    min_elapsed = settings.get("min_projection_elapsed_pct", 10)
+    elapsed_pct = pct_time_elapsed(project, today)
+    if elapsed_pct < min_elapsed:
         return None
-    projected_days = spent / (elapsed_pct / 100.0)
+
+    absence_index = build_absence_index(absences or [])
+    start = parse_date(project["start_date"])
+    elapsed_days = working_days_between(start, today, settings, absence_index)
+    total_days = working_days_between(start, planned_end_date(project),
+                                      settings, absence_index)
+    if elapsed_days <= 0 or total_days <= 0:
+        return None
+
+    projected_days = spent / elapsed_days * total_days
     if projected_days <= 0:
         return None
     theo = theoretical_day_rate(project)
     if not theo:
         return None
-    projected_rate = (project["price_total"] - (costs or 0)) / projected_days
-    return round(projected_rate / theo, 3)
+    return round((net_of_costs(project, costs) / projected_days) / theo, 3)
 
 
-def margin(project, costs=0.0):
-    return round(project["price_total"] - (costs or 0), 2)
+def split_costs(costs):
+    """Accepte soit un nombre (tous coûts absorbés), soit un dict
+    {'absorbed', 'rebilled'}. Renvoie toujours le couple."""
+    if isinstance(costs, dict):
+        return (costs.get("absorbed") or 0.0), (costs.get("rebilled") or 0.0)
+    return (costs or 0.0), 0.0
+
+
+def project_revenue(project, costs=0.0):
+    """Revenu du projet, frais refacturés inclus : ils s'ajoutent au prix
+    au lieu d'être déduits de la marge."""
+    _absorbed, rebilled = split_costs(costs)
+    return (project["price_total"] or 0) + rebilled
+
+
+def net_of_costs(project, costs=0.0):
+    """Prix vendu moins les coûts directs.
+
+    Ce n'est PAS une marge : ça ignore le coût de ton propre temps.
+    Renommé pour cette raison — l'appeler « marge » laissait croire que le
+    chiffre répondait à « est-ce que je gagne de l'argent », alors qu'il
+    répond seulement à « est-ce que je tiens mon budget de jours ».
+    """
+    absorbed, rebilled = split_costs(costs)
+    return round((project["price_total"] or 0) + rebilled - absorbed, 2)
+
+
+# Conservé comme alias : d'autres appels historiques l'utilisent.
+margin = net_of_costs
+
+
+def cost_day_rate(settings):
+    """Ce que coûte une journée de ton temps.
+
+    charges fixes annuelles ÷ jours facturables visés. C'est le chaînon
+    manquant : en dessous de ce seuil, une journée vendue te fait perdre de
+    l'argent, quel que soit l'indice de rentabilité affiché.
+    """
+    charges = settings.get("annual_fixed_costs", 0) or 0
+    days = settings.get("billable_days_per_year", 0) or 0
+    if charges <= 0 or days <= 0:
+        return None
+    return round(charges / days, 2)
+
+
+def real_margin(project, agg, settings, costs=0.0):
+    """Marge réelle : prix − coûts directs − coût des jours passés.
+
+    Négative, elle signifie que le projet t'a coûté plus qu'il ne t'a
+    rapporté, même si tu as respecté ton budget de jours.
+    """
+    rate = cost_day_rate(settings)
+    if rate is None:
+        return None
+    return round(net_of_costs(project, costs) - days_spent(agg) * rate, 2)
+
+
+def break_even(settings, days_billed_this_year):
+    """Seuil de rentabilité annuel : jours déjà facturés contre jours
+    nécessaires pour couvrir les charges fixes."""
+    charges = settings.get("annual_fixed_costs", 0) or 0
+    rate = cost_day_rate(settings)
+    if charges <= 0 or not rate:
+        return None
+    needed = settings.get("billable_days_per_year", 0) or 0
+    return {
+        "days_needed": round(needed, 1),
+        "days_done": round(days_billed_this_year, 1),
+        "pct": round(days_billed_this_year / needed * 100, 1) if needed else None,
+        "cost_day_rate": rate,
+        "annual_fixed_costs": charges,
+    }
 
 
 # --------------------------------------------------------- stats projet
 
-def project_stats(project, agg, settings, costs=0.0, invoiced=None):
+def project_stats(project, agg, settings, costs=0.0, invoiced=None, today=None):
     agg = agg or EMPTY_AGG
+    today = today or date.today()
+
+    # Un seul point de décision pour toute la fiche : si l'indice n'est pas
+    # fiable, AUCUN taux réel ne l'est non plus. Ils sortent du même
+    # dénominateur (les jours passés). Afficher « 40 000 €/jour » à côté
+    # d'un encadré expliquant qu'on ne peut rien conclure était contradictoire.
+    reliable = index_is_reliable(project, agg, settings)
+
     stats = {
         "total_days_sold": total_days_sold(project),
         "days_spent": days_spent(agg),
         "hours_sold": round(hours_sold(project, settings), 1),
         "hours_spent": hours_spent(agg, project, settings),
         "pct_consumed": pct_consumed(project, agg),
-        "pct_time_elapsed": pct_time_elapsed(project),
+        "pct_time_elapsed": pct_time_elapsed(project, today),
         "days_remaining": days_remaining(project, agg),
         "theoretical_day_rate": theoretical_day_rate(project),
-        "real_day_rate": real_day_rate(project, agg, costs),
+        "real_day_rate": real_day_rate(project, agg, costs) if reliable else None,
         "theoretical_hourly_rate": theoretical_hourly_rate(project, settings),
-        "real_hourly_rate": real_hourly_rate(project, agg, settings, costs),
+        "real_hourly_rate": real_hourly_rate(project, agg, settings, costs) if reliable else None,
         "rentability_index": rentability_index(project, agg, settings, costs),
-        "projected_index": projected_rentability_index(project, agg, settings, costs),
-        "index_reliable": index_is_reliable(project, agg, settings),
-        "pace_status": pace_status(project, agg),
+        "projected_index": projected_rentability_index(project, agg, settings, costs, today),
+        "index_reliable": reliable,
+        "pace_status": pace_status(project, agg, today),
         "planned_end_date": planned_end_date(project),
-        "projected_end_date": projected_end_date(project, agg),
+        "projected_end_date": projected_end_date(project, agg, settings, today),
         "entries_count": agg.get("entries_count") or 0,
-        "costs": round(costs or 0, 2),
-        "margin": margin(project, costs),
+        "costs": round(split_costs(costs)[0], 2),
+        "rebilled_costs": round(split_costs(costs)[1], 2),
+        "net_of_costs": net_of_costs(project, costs),
+        "margin": net_of_costs(project, costs),  # alias historique
+        "cost_of_days": (round(days_spent(agg) * cost_day_rate(settings), 2)
+                         if cost_day_rate(settings) else None),
+        "real_margin": real_margin(project, agg, settings, costs),
     }
     if invoiced is not None:
         stats["invoiced"] = round(invoiced.get("invoiced", 0), 2)
@@ -345,8 +525,25 @@ def tally_segments(project, agg, max_segments=40):
 
 # ------------------------------------------------------------ carte de charge
 
-def project_is_active_on(project, day):
-    return parse_date(project["start_date"]) <= day <= planned_end_date(project)
+def project_is_active_on(project, day, overrun_weeks=0):
+    """Un projet occupe-t-il ce jour-là ?
+
+    `overrun_weeks` prolonge la fenêtre au-delà de la fin planifiée pour les
+    projets encore vivants. Sans cette prolongation, un projet confirmé
+    consommé à 130 %, deux semaines après sa fin prévue, portait 0 % de
+    charge — précisément au moment où il mange les journées à venir. La
+    carte devenait purement contractuelle et ignorait le réel.
+    """
+    start = parse_date(project["start_date"])
+    end = planned_end_date(project)
+    if overrun_weeks and project["status"] in ("confirmed", "provisional"):
+        end = end + timedelta(weeks=overrun_weeks)
+    return start <= day <= end
+
+
+def project_is_overrunning(project, day):
+    """Le jour tombe-t-il dans la prolongation, au-delà de la fin prévue ?"""
+    return day > planned_end_date(project)
 
 
 def daily_capacity(projects, window_start, window_days, include_provisional,
@@ -358,10 +555,14 @@ def daily_capacity(projects, window_start, window_days, include_provisional,
     non ouvré (week-end, congé, férié) porte une charge nulle et le signale
     par `level = 'off'` : il ne doit ni colorer la carte, ni compter comme
     un jour non saisi.
+
+    Un projet non terminé prolonge sa charge au-delà de sa fin planifiée,
+    dans la limite de `overrun_weeks` — c'est le dépassement, signalé à part.
     """
     absence_index = build_absence_index(absences or [])
     working = working_days_set(settings)
     n_working = len(working)
+    overrun_weeks = settings.get("overrun_weeks", 4)
 
     days = []
     for i in range(window_days):
@@ -378,17 +579,18 @@ def daily_capacity(projects, window_start, window_days, include_provisional,
             for p in projects:
                 if p["status"] not in ACTIVE_LOAD_STATUSES | OPTIONAL_LOAD_STATUSES:
                     continue
-                if not project_is_active_on(p, day):
+                if not project_is_active_on(p, day, overrun_weeks):
                     continue
                 daily_pct = p["days_per_week"] / n_working * 100
+                overrun = project_is_overrunning(p, day)
                 if p["status"] == "confirmed":
                     pct_confirmed += daily_pct
                     contributors.append({"name": p["name"], "pct": round(daily_pct, 1),
-                                         "provisional": False})
+                                         "provisional": False, "overrun": overrun})
                 elif include_provisional:
                     pct_provisional += daily_pct
                     contributors.append({"name": p["name"], "pct": round(daily_pct, 1),
-                                         "provisional": True})
+                                         "provisional": True, "overrun": overrun})
 
         total = pct_confirmed + pct_provisional
         if off_reason:
@@ -410,6 +612,7 @@ def daily_capacity(projects, window_start, window_days, include_provisional,
             "level": level,
             "off_reason": off_reason,
             "has_provisional": pct_provisional > 0,
+            "has_overrun": any(c["overrun"] for c in contributors),
             "contributors": contributors,
         })
     return days
@@ -490,6 +693,16 @@ def build_alerts(project_rows, capacity, milestones, missing, settings, today=No
                 "text": f"{p['name']} se termine le {end.isoformat()}.",
                 "url_name": "project_detail", "url_arg": p["id"],
             })
+        elif p["status"] == "confirmed" and end < today:
+            # L'information la plus actionnable de l'app : ce projet devait
+            # être fini, il ne l'est pas, et il occupe encore des journées.
+            jours = (today - end).days
+            alerts.append({
+                "level": "danger",
+                "text": (f"{p['name']} est prolongé de {jours} jour(s) au-delà de sa "
+                         "fin prévue et occupe encore ta charge."),
+                "url_name": "project_detail", "url_arg": p["id"],
+            })
 
     for m in milestones:
         if m["status"] == "todo" and m["due_date"] and m["due_date"] <= today.isoformat():
@@ -521,6 +734,10 @@ def build_alerts(project_rows, capacity, milestones, missing, settings, today=No
             "level": "info",
             "text": f"{len(missing)} jour(s) ouvré(s) sans saisie : {jours}.",
             "url_name": "week", "url_arg": None,
+            # Permet de clore l'alerte pour un jour légitimement non
+            # travaillé mais non déclaré : sans ça, elle revient chaque
+            # jour et on apprend à l'ignorer.
+            "dismiss_day": missing[-1].isoformat(),
         })
 
     order = {"danger": 0, "warning": 1, "info": 2}
@@ -562,35 +779,59 @@ def revenue_overview(projects, milestone_totals, invoiced_this_month,
     }
 
 
-def client_rollup(project_rows, milestone_totals):
+def client_rollup(project_rows, milestone_totals, settings=None):
     """Agrégat par client, avec la part de CA que chacun représente.
 
     La concentration est l'information la plus utile ici : savoir qu'un
     client pèse 70 % de ton activité est un signal de risque, pas une
     statistique décorative.
+
+    Le revenu inclut les frais refacturés et exclut les coûts absorbés,
+    exactement comme `net_of_costs` sur la fiche projet : les deux pages
+    doivent donner le même chiffre pour le même projet.
     """
     clients = {}
+    partial = set()
     for row in project_rows:
         p, stats = row["project"], row["stats"]
         name = (p["client"] or "").strip() or "Sans client"
         c = clients.setdefault(name, {
             "client": name, "projects": 0, "revenue": 0.0, "invoiced": 0.0,
-            "days_sold": 0.0, "days_spent": 0.0, "costs": 0.0,
+            "days_sold": 0.0, "days_spent": 0.0, "costs": 0.0, "rebilled": 0.0,
+            "reliable_days": 0.0, "reliable_net": 0.0,
         })
         c["projects"] += 1
         c["revenue"] += p["price_total"] or 0
+        c["rebilled"] += stats.get("rebilled_costs", 0)
         c["invoiced"] += milestone_totals.get(p["id"], {}).get("invoiced", 0)
         c["days_sold"] += stats["total_days_sold"]
         c["days_spent"] += stats["days_spent"]
         c["costs"] += stats["costs"]
 
+        # Le taux réel n'agrège que les projets dont l'indice est fiable :
+        # mélanger un projet à 2 % de consommation avec un projet terminé
+        # produisait une moyenne qui ne voulait rien dire.
+        if stats["index_reliable"]:
+            c["reliable_days"] += stats["days_spent"]
+            c["reliable_net"] += stats["net_of_costs"]
+        elif stats["days_spent"] > 0:
+            partial.add(name)
+
     total_revenue = sum(c["revenue"] for c in clients.values()) or 1
     rows = []
     for c in clients.values():
         c["share"] = round(c["revenue"] / total_revenue * 100, 1)
-        c["real_day_rate"] = round((c["revenue"] - c["costs"]) / c["days_spent"], 2) if c["days_spent"] else None
+        c["real_day_rate"] = (round(c["reliable_net"] / c["reliable_days"], 2)
+                              if c["reliable_days"] else None)
         c["sold_day_rate"] = round(c["revenue"] / c["days_sold"], 2) if c["days_sold"] else None
-        for key in ("revenue", "invoiced", "days_sold", "days_spent", "costs"):
+        c["partial"] = c["client"] in partial
+        if settings:
+            rate = cost_day_rate(settings)
+            c["real_margin"] = (round(c["reliable_net"] - c["reliable_days"] * rate, 2)
+                                if rate and c["reliable_days"] else None)
+        else:
+            c["real_margin"] = None
+        for key in ("revenue", "invoiced", "days_sold", "days_spent", "costs", "rebilled"):
             c[key] = round(c[key], 2)
         rows.append(c)
     rows.sort(key=lambda r: r["revenue"], reverse=True)
@@ -622,8 +863,14 @@ def burndown_points(project, daily_entries, width=560, height=140, pad=26):
     cumulative = 0.0
     points = [f"{x_for(start):.1f},{y_for(0):.1f}"]
     for e in daily_entries:
+        # Une entrée à date illisible est ignorée du tracé plutôt que de
+        # faire tomber la fiche projet — qui est la seule page depuis
+        # laquelle on peut justement supprimer cette entrée.
+        day = parse_date(e["entry_date"], default=False)
+        if day is False:
+            continue
         cumulative += e["percent_of_day"] / 100.0
-        points.append(f"{x_for(parse_date(e['entry_date'])):.1f},{y_for(cumulative):.1f}")
+        points.append(f"{x_for(day):.1f},{y_for(cumulative):.1f}")
     if len(points) == 1:
         points.append(f"{x_for(today):.1f},{y_for(0):.1f}")
 
@@ -660,18 +907,32 @@ def bar_chart(series, value_key, width=640, height=170, pad=30):
     return {"width": width, "height": height, "pad": pad, "bars": bars, "max": maximum}
 
 
-def gantt_rows(projects, window_start, window_days):
+def gantt_rows(projects, window_start, window_days, settings=None, today=None):
     """Position de chaque projet sur la fenêtre, en index de colonne
-    (0 = premier jour). Les projets débordants sont recadrés."""
+    (0 = premier jour). Les projets débordants sont recadrés.
+
+    La barre est prolongée au-delà de la fin planifiée pour les projets
+    encore vivants, de la même façon que la carte de charge : les deux
+    doivent raconter la même histoire.
+    """
     window_end = window_start + timedelta(days=window_days - 1)
+    overrun_weeks = (settings or {}).get("overrun_weeks", 4)
+    today = today or date.today()
     rows = []
     for p in projects:
-        start, end = parse_date(p["start_date"]), planned_end_date(p)
+        start = parse_date(p["start_date"])
+        planned = planned_end_date(p)
+        end = planned
+        overrun = False
+        if p["status"] in ("confirmed", "provisional") and planned < today:
+            end = min(planned + timedelta(weeks=overrun_weeks), max(today, planned))
+            overrun = end > planned
         if end < window_start or start > window_end:
             continue
         clipped_start, clipped_end = max(start, window_start), min(end, window_end)
         start_idx = (clipped_start - window_start).days
         end_idx = (clipped_end - window_start).days
+        planned_idx = (min(planned, window_end) - window_start).days
         rows.append({
             "project": p,
             "start_idx": start_idx,
@@ -679,5 +940,68 @@ def gantt_rows(projects, window_start, window_days):
             "span": end_idx - start_idx + 1,
             "clipped_start": clipped_start > start,
             "clipped_end": clipped_end < end,
+            "overrun": overrun,
+            "planned_idx": planned_idx,
         })
     return rows
+
+
+# ------------------------------------------------- prévisionnel d'encaissement
+
+DEFAULT_PAYMENT_DELAY = 30  # jours, faute d'historique pour ce client
+
+
+def cash_forecast(open_milestones, delays, months=3, today=None):
+    """Projette les encaissements à venir, mois par mois.
+
+    Un jalon déjà facturé est daté à `invoiced_at + délai du client` ; un
+    jalon encore à facturer, à `échéance + délai`. Toutes les données
+    existaient déjà — il manquait seulement de les croiser.
+
+    Pour un indépendant, savoir ce qui tombe en octobre est plus actionnable
+    que de savoir quel projet a le meilleur indice.
+    """
+    today = today or date.today()
+    buckets = {}
+    for i in range(months):
+        month = (today.replace(day=1) + timedelta(days=32 * i)).replace(day=1)
+        buckets[month.strftime("%Y-%m")] = {"month": month.strftime("%Y-%m"),
+                                            "amount": 0.0, "items": []}
+
+    overdue = []
+    for m in open_milestones:
+        client = m["project_client"] or "Sans client"
+        delay = delays.get(client, {}).get("days", DEFAULT_PAYMENT_DELAY)
+
+        if m["status"] == "invoiced" and m["invoiced_at"]:
+            base = parse_date(m["invoiced_at"][:10], default=None)
+        elif m["due_date"]:
+            base = parse_date(m["due_date"][:10], default=None)
+        else:
+            base = None
+        if base is None:
+            continue
+
+        expected = base + timedelta(days=round(delay))
+        if expected < today:
+            overdue.append({"milestone": m, "expected": expected,
+                            "late_days": (today - expected).days})
+            continue
+
+        key = expected.strftime("%Y-%m")
+        if key in buckets:
+            buckets[key]["amount"] += m["amount"] or 0
+            buckets[key]["items"].append({"label": m["label"],
+                                          "project": m["project_name"],
+                                          "client": client,
+                                          "amount": m["amount"] or 0,
+                                          "expected": expected,
+                                          "estimated": m["status"] != "invoiced"})
+
+    series = list(buckets.values())
+    for b in series:
+        b["amount"] = round(b["amount"], 2)
+        b["items"].sort(key=lambda i: i["expected"])
+    overdue.sort(key=lambda o: o["expected"])
+    return {"months": series, "overdue": overdue,
+            "total": round(sum(b["amount"] for b in series), 2)}

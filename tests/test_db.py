@@ -133,3 +133,73 @@ def test_init_db_est_idempotent(base):
     base.init_db()
 
     assert base.get_project(pid) is not None
+
+
+def test_corbeille_sort_des_agregats_de_ca(base):
+    """Un projet en corbeille disparaissait de la page Facturation mais
+    continuait à peser dans « Facturé ce mois » : deux pages affichaient des
+    totaux qui ne se recoupaient pas."""
+    pid = base.create_project(project_data())
+    base.create_milestone(pid, "Acompte", 5000, None)
+    mid = base.list_milestones(pid)[0]["id"]
+    base.set_milestone_status(mid, "invoiced", "F-001")
+
+    assert base.invoiced_between("2000-01-01", "2100-01-01") == 5000
+
+    base.archive_project(pid, True)
+
+    assert base.invoiced_between("2000-01-01", "2100-01-01") == 0
+    assert base.monthly_invoiced() == []
+
+
+def test_sauvegarde_contient_les_ecritures_recentes(base):
+    """En mode WAL, envoyer le fichier principal seul pouvait produire une
+    sauvegarde en retard sur la base réelle."""
+    import sqlite3
+    import tempfile
+
+    pid = base.create_project(project_data())
+    base.create_entry(pid, "2026-08-20", 50, 3.5)
+
+    handle = tempfile.NamedTemporaryFile(suffix=".sqlite3", delete=False)
+    handle.close()
+    base.backup_to(handle.name)
+
+    conn = sqlite3.connect(handle.name)
+    count = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+    conn.close()
+
+    assert count == 1
+
+
+def test_recherche_echappe_les_jokers(base):
+    """Un « % » ou un « _ » tapé par l'utilisateur agissait comme joker et
+    la recherche renvoyait n'importe quoi."""
+    base.create_project(project_data(name="Refonte 100%"))
+    base.create_project(project_data(name="Refonte AB"))
+
+    assert [p["name"] for p in base.list_projects(search="100%")] == ["Refonte 100%"]
+
+
+def test_antidater_une_facturation(base):
+    """Marquer le 3 août un jalon facturé le 28 juillet rangeait le CA dans
+    le mauvais mois, sans moyen de corriger."""
+    pid = base.create_project(project_data())
+    base.create_milestone(pid, "Acompte", 5000, None)
+    mid = base.list_milestones(pid)[0]["id"]
+
+    base.set_milestone_status(mid, "invoiced", "F-001", dated="2026-07-28")
+
+    assert base.get_milestone(mid)["invoiced_at"] == "2026-07-28"
+    assert {m["month"] for m in base.monthly_invoiced()} == {"2026-07"}
+
+
+def test_modifier_un_jalon(base):
+    pid = base.create_project(project_data())
+    base.create_milestone(pid, "Acompte", 5000, "2026-09-01")
+    mid = base.list_milestones(pid)[0]["id"]
+
+    base.update_milestone(mid, "Acompte 40%", 8000, "2026-10-01")
+
+    m = base.get_milestone(mid)
+    assert (m["label"], m["amount"], m["due_date"]) == ("Acompte 40%", 8000, "2026-10-01")

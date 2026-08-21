@@ -12,20 +12,24 @@
     <a href="{{ url_for('edit_project', project_id=project.id) }}" class="btn btn-ghost btn-sm">Modifier</a>
     {% if project.status == 'provisional' %}
       <form class="inline-form" method="post" action="{{ url_for('change_status', project_id=project.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="status" value="confirmed">
         <button type="submit" class="btn btn-primary btn-sm">Confirmer le projet</button>
       </form>
     {% elif project.status == 'confirmed' %}
       <form class="inline-form" method="post" action="{{ url_for('change_status', project_id=project.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="status" value="completed">
         <button type="submit" class="btn btn-ghost btn-sm">Marquer terminé</button>
       </form>
       <form class="inline-form" method="post" action="{{ url_for('change_status', project_id=project.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="status" value="paused">
         <button type="submit" class="btn btn-ghost btn-sm">Mettre en pause</button>
       </form>
     {% elif project.status in ('paused', 'completed') %}
       <form class="inline-form" method="post" action="{{ url_for('change_status', project_id=project.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="status" value="confirmed">
         <button type="submit" class="btn btn-ghost btn-sm">Réactiver</button>
       </form>
@@ -95,41 +99,74 @@
   <div class="card-title-row"><h3>Argent</h3></div>
   <div class="stat-strip">
     <div class="stat"><div class="stat-num">{{ '%.0f'|format(project.price_total) }}{{ currency }}</div><div class="stat-label">Prix vendu</div></div>
-    <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.costs) }}{{ currency }}</div><div class="stat-label">Coûts directs</div></div>
-    <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.margin) }}{{ currency }}</div><div class="stat-label">Marge</div></div>
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.costs) }}{{ currency }}</div><div class="stat-label">Coûts absorbés</div></div>
+    {% if stats.rebilled_costs %}
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.rebilled_costs) }}{{ currency }}</div><div class="stat-label">Frais refacturés</div></div>
+    {% endif %}
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.net_of_costs) }}{{ currency }}</div><div class="stat-label">Net de coûts directs</div></div>
+    {% if stats.real_margin is not none %}
+    <div class="stat">
+      <div class="stat-num {{ 'negative-num' if stats.real_margin < 0 }}">{{ '%.0f'|format(stats.real_margin) }}{{ currency }}</div>
+      <div class="stat-label">Marge réelle</div>
+      <div class="faint">après {{ '%.0f'|format(stats.cost_of_days) }}{{ currency }} de coût de tes jours</div>
+    </div>
+    {% endif %}
     <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.invoiced) }}{{ currency }}</div><div class="stat-label">Facturé</div></div>
     <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.paid) }}{{ currency }}</div><div class="stat-label">Encaissé</div></div>
     <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.to_invoice) }}{{ currency }}</div><div class="stat-label">Reste à facturer</div></div>
   </div>
 
+  {% if stats.real_margin is none %}
+  <p class="field-help-box">
+    « Net de coûts directs » n'est pas une marge : ce chiffre ignore le coût
+    de ton propre temps. Renseigne tes charges fixes annuelles dans
+    <a href="{{ url_for('settings_page') }}" class="inline-link">Réglages</a>
+    pour obtenir une marge réelle.
+  </p>
+  {% endif %}
+
   <h4 class="sub-head">Jalons de facturation</h4>
   {% if milestones %}
   <table class="entries">
-    <thead><tr><th>Jalon</th><th>Montant</th><th>Échéance</th><th>Statut</th><th>Réf.</th><th></th></tr></thead>
+    <thead><tr><th colspan="6">Libellé · montant · échéance — modifiables directement</th></tr></thead>
     <tbody>
       {% for m in milestones %}
       <tr>
-        <td>{{ m.label }}</td>
-        <td class="mono">{{ '%.0f'|format(m.amount) }}{{ currency }}</td>
-        <td class="mono">{{ m.due_date or '—' }}</td>
-        <td><span class="pill pill-ms-{{ m.status }}">{{ milestone_label[m.status] }}</span></td>
-        <td class="mono">{{ m.invoice_ref or '—' }}</td>
-        <td class="row-actions">
-          {% if m.status == 'todo' %}
-          <form method="post" action="{{ url_for('milestone_status', milestone_id=m.id) }}" class="inline-form">
-            <input type="hidden" name="status" value="invoiced">
-            <input type="text" name="invoice_ref" placeholder="n° facture" class="mini-input">
-            <button type="submit" class="btn btn-ghost btn-sm">Facturé</button>
-          </form>
-          {% elif m.status == 'invoiced' %}
-          <form method="post" action="{{ url_for('milestone_status', milestone_id=m.id) }}" class="inline-form">
-            <input type="hidden" name="status" value="paid">
-            <button type="submit" class="btn btn-ghost btn-sm">Encaissé</button>
-          </form>
-          {% endif %}
-          <form method="post" action="{{ url_for('delete_milestone', milestone_id=m.id) }}" class="inline-form" onsubmit="return confirm('Supprimer ce jalon ?');">
-            <button type="submit" class="btn btn-ghost btn-sm">Suppr.</button>
-          </form>
+        <td colspan="6">
+          <div class="milestone-row">
+            <form method="post" action="{{ url_for('edit_milestone', milestone_id=m.id) }}" class="milestone-edit">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input name="label" value="{{ m.label }}" class="mini-input" style="width:180px;" aria-label="Libellé">
+              <input name="amount" type="number" step="10" min="0" value="{{ m.amount|round(0)|int }}" class="mini-input" style="width:100px;" aria-label="Montant">
+              <input name="due_date" type="date" value="{{ m.due_date or '' }}" class="mini-input" style="width:150px;" aria-label="Échéance">
+              <button type="submit" class="btn btn-ghost btn-sm">Enregistrer</button>
+            </form>
+            <span class="pill pill-ms-{{ m.status }}">{{ milestone_label[m.status] }}</span>
+            {% if m.invoice_ref %}<span class="tag-pill">{{ m.invoice_ref }}</span>{% endif %}
+            {% if m.invoiced_at %}<span class="faint mono">facturé le {{ m.invoiced_at[:10] }}</span>{% endif %}
+            {% if m.paid_at %}<span class="faint mono">encaissé le {{ m.paid_at[:10] }}</span>{% endif %}
+
+            {% if m.status == 'todo' %}
+            <form method="post" action="{{ url_for('milestone_status', milestone_id=m.id) }}" class="milestone-action">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="status" value="invoiced">
+              <input type="text" name="invoice_ref" placeholder="n° facture" class="mini-input" style="width:110px;">
+              <input type="date" name="dated" value="{{ today }}" class="mini-input" style="width:150px;" aria-label="Date de facturation">
+              <button type="submit" class="btn btn-ghost btn-sm">Facturé</button>
+            </form>
+            {% elif m.status == 'invoiced' %}
+            <form method="post" action="{{ url_for('milestone_status', milestone_id=m.id) }}" class="milestone-action">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="status" value="paid">
+              <input type="date" name="dated" value="{{ today }}" class="mini-input" style="width:150px;" aria-label="Date d'encaissement">
+              <button type="submit" class="btn btn-ghost btn-sm">Encaissé</button>
+            </form>
+            {% endif %}
+            <form method="post" action="{{ url_for('delete_milestone', milestone_id=m.id) }}" class="milestone-action" onsubmit="return confirm('Supprimer ce jalon ?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn btn-ghost btn-sm">Suppr.</button>
+            </form>
+          </div>
         </td>
       </tr>
       {% endfor %}
@@ -140,6 +177,7 @@
   {% endif %}
 
   <form method="post" action="{{ url_for('create_milestone', project_id=project.id) }}" class="quick-add" style="margin-top: var(--space-4);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="field field-note"><label>Libellé</label><input name="label" type="text" placeholder="Acompte 30%" required></div>
     <div class="field field-pct"><label>Montant</label><input name="amount" type="number" step="10" min="0" required></div>
     <div class="field field-date"><label>Échéance</label><input name="due_date" type="date"></div>
@@ -153,11 +191,12 @@
     <tbody>
       {% for c in costs %}
       <tr>
-        <td>{{ c.label }}</td>
+        <td>{{ c.label }}{% if c.billable %} <span class="tag-pill">refacturé</span>{% endif %}</td>
         <td class="mono">{{ '%.0f'|format(c.amount) }}{{ currency }}</td>
         <td class="mono">{{ c.cost_date or '—' }}</td>
         <td>
           <form method="post" action="{{ url_for('delete_cost', cost_id=c.id) }}" class="inline-form" onsubmit="return confirm('Supprimer ce coût ?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="btn btn-ghost btn-sm">Suppr.</button>
           </form>
         </td>
@@ -170,9 +209,13 @@
   {% endif %}
 
   <form method="post" action="{{ url_for('create_cost', project_id=project.id) }}" class="quick-add" style="margin-top: var(--space-4);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="field field-note"><label>Libellé</label><input name="label" type="text" placeholder="Sous-traitance intégration" required></div>
     <div class="field field-pct"><label>Montant</label><input name="amount" type="number" step="10" min="0" required></div>
     <div class="field field-date"><label>Date</label><input name="cost_date" type="date"></div>
+    <div class="field">
+      <label class="checkbox-pill"><input type="checkbox" name="billable" value="1"> refacturé au client</label>
+    </div>
     <button type="submit" class="btn btn-ghost">Ajouter le coût</button>
   </form>
 </section>
@@ -198,6 +241,7 @@
       <tr>
         <td>
           <form method="post" action="{{ url_for('rename_task', task_id=t.id) }}" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input name="name" value="{{ t.name }}" class="mini-input" style="width: 220px;">
             <button type="submit" class="btn btn-ghost btn-sm">Renommer</button>
           </form>
@@ -205,10 +249,12 @@
         </td>
         <td class="row-actions">
           <form method="post" action="{{ url_for('toggle_task_archive', task_id=t.id) }}" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="archived" value="{{ 0 if t.archived else 1 }}">
             <button type="submit" class="btn btn-ghost btn-sm">{{ 'Réactiver' if t.archived else 'Archiver' }}</button>
           </form>
           <form method="post" action="{{ url_for('delete_task', task_id=t.id) }}" class="inline-form" onsubmit="return confirm('Supprimer cette tâche ? Le temps saisi est conservé sans étiquette.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="btn btn-ghost btn-sm">Suppr.</button>
           </form>
         </td>
@@ -219,6 +265,7 @@
   {% endif %}
 
   <form method="post" action="{{ url_for('create_task', project_id=project.id) }}" class="quick-add" style="margin-top: var(--space-4);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="field field-note"><label>Nouvelle tâche</label><input name="name" type="text" placeholder="Maquettes, Intégration, Réunions client…" required></div>
     <button type="submit" class="btn btn-ghost">Ajouter</button>
   </form>
@@ -227,6 +274,7 @@
 <section class="card section-gap">
   <div class="card-title-row"><h3>Ajouter du temps</h3></div>
   <form class="quick-add" method="post" action="{{ url_for('create_entry') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="project_id" value="{{ project.id }}">
     <input type="hidden" name="next" value="{{ url_for('project_detail', project_id=project.id) }}">
     <div class="field field-pct"><label>% du jour</label><input name="percent_of_day" type="number" step="5" min="0" max="300" placeholder="40" required></div>
@@ -250,6 +298,21 @@
     <h3>Historique ({{ total_entries }})</h3>
     <a href="{{ url_for('export', kind='entries') }}" class="faint">exporter en CSV →</a>
   </div>
+  <form method="get" class="filter-bar">
+    <input type="date" name="from" value="{{ date_from or '' }}" aria-label="A partir du">
+    <input type="date" name="to" value="{{ date_to or '' }}" aria-label="Jusqu au">
+    <select name="task" aria-label="Tache">
+      <option value="">Toutes les taches</option>
+      <option value="none" {{ 'selected' if task_filter == 'none' }}>Sans tache</option>
+      {% for t in tasks %}
+      <option value="{{ t.id }}" {{ 'selected' if task_filter == t.id|string }}>{{ t.name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-ghost btn-sm">Filtrer</button>
+    {% if date_from or date_to or task_filter %}
+    <a href="{{ url_for('project_detail', project_id=project.id) }}" class="faint">reinitialiser</a>
+    {% endif %}
+  </form>
   {% if entries %}
   <table class="entries">
     <thead><tr><th>Date</th><th>%</th><th>Jours</th><th>Tâche</th><th>Note</th><th></th></tr></thead>
@@ -264,6 +327,7 @@
         <td class="row-actions">
           <a href="{{ url_for('edit_entry', entry_id=e.id) }}" class="btn btn-ghost btn-sm">Modifier</a>
           <form method="post" action="{{ url_for('delete_entry', entry_id=e.id) }}" class="inline-form" onsubmit="return confirm('Supprimer cette entrée ?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="btn btn-ghost btn-sm">Suppr.</button>
           </form>
         </td>
@@ -273,9 +337,9 @@
   </table>
   {% if total_pages > 1 %}
   <div class="pager">
-    {% if page > 1 %}<a href="{{ url_for('project_detail', project_id=project.id, page=page-1) }}" class="btn btn-ghost btn-sm">← précédent</a>{% endif %}
+    {% if page > 1 %}<a href="{{ url_for('project_detail', project_id=project.id, page=page-1, **{'from': date_from, 'to': date_to, 'task': task_filter}) }}" class="btn btn-ghost btn-sm">← précédent</a>{% endif %}
     <span class="faint">page {{ page }} / {{ total_pages }}</span>
-    {% if page < total_pages %}<a href="{{ url_for('project_detail', project_id=project.id, page=page+1) }}" class="btn btn-ghost btn-sm">suivant →</a>{% endif %}
+    {% if page < total_pages %}<a href="{{ url_for('project_detail', project_id=project.id, page=page+1, **{'from': date_from, 'to': date_to, 'task': task_filter}) }}" class="btn btn-ghost btn-sm">suivant →</a>{% endif %}
   </div>
   {% endif %}
   {% else %}
@@ -310,8 +374,13 @@
 </section>
 {% endif %}
 
-<div class="section-gap">
-  <form method="post" action="{{ url_for('archive_project', project_id=project.id) }}" onsubmit="return confirm('Mettre ce projet à la corbeille ? Il restera récupérable.');">
+<div class="section-gap btn-row">
+  <form method="post" action="{{ url_for('duplicate_project', project_id=project.id) }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn-ghost btn-sm">Reconduire ce projet</button>
+  </form>
+    <form method="post" action="{{ url_for('archive_project', project_id=project.id) }}" onsubmit="return confirm('Mettre ce projet à la corbeille ? Il restera récupérable.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit" class="btn btn-danger btn-sm">Mettre à la corbeille</button>
   </form>
 </div>

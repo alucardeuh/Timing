@@ -12,6 +12,7 @@
 <section class="card">
   <div class="card-title-row"><h3>Déclarer une absence</h3></div>
   <form method="post" class="quick-add">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="field field-note"><label>Libellé</label><input name="label" type="text" placeholder="Vacances d'été" required></div>
     <div class="field field-project">
       <label>Type</label>
@@ -47,6 +48,7 @@
         <td class="mono">{{ a.end_date }}</td>
         <td>
           <form method="post" action="{{ url_for('delete_absence', absence_id=a.id) }}" class="inline-form" onsubmit="return confirm('Supprimer cette absence ?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="btn btn-ghost btn-sm">Suppr.</button>
           </form>
         </td>

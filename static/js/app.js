@@ -71,7 +71,10 @@
     const list = document.createElement("ul");
     contributors.forEach((c) => {
       const li = document.createElement("li");
-      li.textContent = c.name + (c.provisional ? " (provisoire)" : "") + " — " + c.pct + "%";
+      let suffixe = "";
+      if (c.provisional) suffixe += " (provisoire)";
+      if (c.overrun) suffixe += " (au-delà de sa fin prévue)";
+      li.textContent = c.name + suffixe + " — " + c.pct + "%";
       list.appendChild(li);
     });
     box.appendChild(list);
@@ -106,6 +109,20 @@
   document.querySelectorAll(".checkbox-pill input").forEach((input) => {
     input.addEventListener("change", () => {
       input.closest(".checkbox-pill").classList.toggle("is-checked", input.checked);
+    });
+  });
+})();
+
+(function dayPresets() {
+  // Boutons de préréglage de la vue jour : ils remplissent le champ, ils
+  // n'envoient rien — l'enregistrement reste un geste explicite.
+  document.querySelectorAll(".day-preset").forEach((button) => {
+    button.addEventListener("click", () => {
+      const field = document.getElementsByName(button.dataset.target)[0];
+      if (!field) return;
+      const value = button.dataset.value;
+      field.value = value === "0" ? "" : value;
+      field.focus();
     });
   });
 })();

@@ -10,24 +10,86 @@ from __future__ import annotations
 import csv
 import io
 import os
+import secrets
+import tempfile
 from datetime import date, datetime, timedelta
 
 from flask import (
-    Flask, Response, abort, flash, redirect, render_template, request,
-    send_file, url_for,
+    Flask, Response, abort, after_this_request, flash, g, redirect,
+    render_template, request,
+    send_file, session, url_for,
 )
 
 import calculations as calc
 import db
 
 app = Flask(__name__)
-# Clé de session locale mono-utilisateur : elle ne protège que les messages
-# flash. Surchargeable par TIMING_SECRET si tu tiens à la changer.
-app.secret_key = os.environ.get("TIMING_SECRET", "timing-local-single-user")
+
+
+def _secret_key():
+    """Clé de session : variable d'environnement, sinon une clé aléatoire
+    persistée en base au premier lancement.
+
+    Une constante en dur dans le code source signifiait que n'importe qui
+    disposant du dépôt pouvait forger un cookie de session valide.
+    """
+    if os.environ.get("TIMING_SECRET"):
+        return os.environ["TIMING_SECRET"]
+    db.init_db()
+    stored = db.get_settings().get("secret_key")
+    if not stored or stored == "0":
+        stored = secrets.token_hex(32)
+        db.set_setting("secret_key", stored)
+    return stored
+
+
+app.secret_key = _secret_key()
 
 PLANNING_WINDOW_DAYS = 91  # 13 semaines
 HOME_WINDOW_DAYS = 56      # 8 semaines
 ENTRIES_PER_PAGE = 50
+# Un projet terminé depuis moins de N jours reste saisissable dans la grille.
+COMPLETED_GRACE_DAYS = 15
+
+# Méthodes qui ne modifient rien : elles n'ont pas besoin de jeton.
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+
+
+@app.before_request
+def csrf_protect():
+    """Jeton CSRF sur toute méthode modifiant l'état.
+
+    Même en local, une page ouverte dans le même navigateur peut poster un
+    formulaire vers 127.0.0.1:5062 : les requêtes form-encoded ne déclenchent
+    pas de préflight CORS. La suppression définitive d'un projet est protégée
+    par la ressaisie du nom, mais supprimer une entrée, une absence, un jalon
+    ou un coût ne l'était pas du tout.
+    """
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_urlsafe(32)
+    # CSRF_PROTECT=False permet aux tests de poster sans jeton ; la
+    # protection reste active partout ailleurs, et un test dédié la vérifie.
+    if request.method in SAFE_METHODS or not app.config.get("CSRF_PROTECT", True):
+        return None
+    submitted = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
+    if not submitted or not secrets.compare_digest(submitted, session["csrf_token"]):
+        return render_template(
+            "error.html", code=400,
+            message="Jeton de sécurité manquant ou expiré. Recharge la page et réessaie.",
+        ), 400
+    return None
+
+
+def safe_next(value, fallback):
+    """N'accepte qu'un chemin interne comme cible de redirection.
+
+    `redirect(request.form.get("next"))` sans contrôle est une redirection
+    ouverte : un champ caché trafiqué pouvait renvoyer vers un site externe.
+    """
+    candidate = (value or "").strip()
+    if candidate.startswith("/") and not candidate.startswith("//"):
+        return candidate
+    return fallback
 
 STATUS_LABELS = {
     "provisional": "provisoire", "confirmed": "confirmé",
@@ -35,7 +97,7 @@ STATUS_LABELS = {
 }
 PACE_LABELS = {
     "not_started": "pas commencé", "ahead": "en avance",
-    "on_track": "dans les clous", "behind": "en retard",
+    "on_track": "dans les clous", "tight": "tendu", "behind": "en retard",
 }
 MILESTONE_LABELS = {"todo": "à facturer", "invoiced": "facturé", "paid": "encaissé"}
 ABSENCE_LABELS = {"conges": "congés", "ferie": "férié", "indispo": "indisponible"}
@@ -78,17 +140,24 @@ def opt_float(form, field, label, minimum=None):
     return req_float(form, field, label, minimum=minimum)
 
 
+def valid_date(value, label):
+    """Valide une date ISO isolée (pas forcément issue d'un champ de
+    formulaire) et la renvoie, ou lève une FormError lisible."""
+    raw = (value or "").strip()
+    try:
+        datetime.strptime(raw, "%Y-%m-%d")
+    except ValueError:
+        raise FormError(f"« {label} » n'est pas une date valide (attendu AAAA-MM-JJ).")
+    return raw
+
+
 def req_date(form, field, label, default_today=False):
     raw = (form.get(field) or "").strip()
     if not raw:
         if default_today:
             return date.today().isoformat()
         raise FormError(f"« {label} » est obligatoire.")
-    try:
-        datetime.strptime(raw, "%Y-%m-%d")
-    except ValueError:
-        raise FormError(f"« {label} » n'est pas une date valide (attendu AAAA-MM-JJ).")
-    return raw
+    return valid_date(raw, label)
 
 
 def req_choice(form, field, label, allowed, default=None):
@@ -120,12 +189,7 @@ def parse_project_form(form):
         "duration_value": duration_value,
         "duration_unit": duration_unit,
     })
-    # Le TJM prime s'il est renseigné : c'est la façon dont on vend, le prix
-    # total en découle. Sinon on prend le prix tel quel.
-    if day_rate:
-        price_total = round(day_rate * total_days, 2)
-    elif price_total is None:
-        price_total = 0.0
+    day_rate, price_total = calc.resolve_price(day_rate, price_total, total_days)
 
     return {
         "name": req_text(form, "name", "Nom du projet"),
@@ -140,6 +204,17 @@ def parse_project_form(form):
         "start_date": req_date(form, "start_date", "Date de début", default_today=True),
         "notes": (form.get("notes") or "").strip(),
     }
+
+
+def current_settings():
+    """Réglages mis en cache pour la durée de la requête.
+
+    db.get_settings() ouvrait une connexion à chaque appel : une fois dans le
+    context_processor, puis une seconde fois dans presque chaque route.
+    """
+    if not hasattr(g, "_settings"):
+        g._settings = db.get_settings()
+    return g._settings
 
 
 def percent_to_hours(percent, project, settings):
@@ -163,7 +238,7 @@ def project_rows(projects, settings, aggregates=None, costs=None, milestones=Non
             "project": p,
             "stats": calc.project_stats(
                 p, aggregates.get(p["id"], calc.EMPTY_AGG), settings,
-                costs=costs.get(p["id"], 0.0),
+                costs=costs.get(p["id"], {"absorbed": 0.0, "rebilled": 0.0}),
                 invoiced=milestones.get(p["id"], {"total": 0, "invoiced": 0, "paid": 0}),
             ),
         })
@@ -172,8 +247,9 @@ def project_rows(projects, settings, aggregates=None, costs=None, milestones=Non
 
 @app.context_processor
 def inject_globals():
-    settings = db.get_settings()
+    settings = current_settings()
     return {
+        "csrf_token": session.get("csrf_token", ""),
         "currency": settings["currency_symbol"],
         "today": date.today().isoformat(),
         "status_label": STATUS_LABELS,
@@ -199,7 +275,7 @@ def server_error(_):
 
 @app.route("/")
 def dashboard():
-    settings = db.get_settings()
+    settings = current_settings()
     today = date.today()
 
     projects = db.list_projects()
@@ -210,7 +286,7 @@ def dashboard():
 
     loggable = [p for p in projects if p["status"] in ("provisional", "confirmed")]
     cards = [r for r in rows if r["project"]["status"] in ("confirmed", "provisional")]
-    order = {"behind": 0, "on_track": 1, "not_started": 2, "ahead": 3}
+    order = {"behind": 0, "tight": 1, "on_track": 2, "not_started": 3, "ahead": 4}
     cards.sort(key=lambda c: order.get(c["stats"]["pace_status"], 2))
 
     include_provisional = request.args.get("include_provisional", "1") != "0"
@@ -222,9 +298,30 @@ def dashboard():
     # Classement de rentabilité : uniquement les projets dont l'indice est
     # fiable. Sans ce filtre, un projet avec une heure saisie arrivait
     # premier avec un ×280 dénué de sens.
-    ranked = [{"project": r["project"], "index": r["stats"]["rentability_index"]}
+    # Trier par indice seul pousse à optimiser un ratio plutôt que de
+    # l'argent : un ×1,8 sur 2 000 € pèse moins qu'un ×1,05 sur 40 000 €.
+    # Le montant est donc affiché à côté, et le tri est au choix.
+    rank_by = request.args.get("rank", "margin")
+    ranked = [{"project": r["project"],
+               "index": r["stats"]["rentability_index"],
+               "net": r["stats"]["net_of_costs"],
+               "real_margin": r["stats"]["real_margin"],
+               "day_rate": r["stats"]["real_day_rate"]}
               for r in rows if r["stats"]["rentability_index"] is not None]
-    ranked.sort(key=lambda r: r["index"], reverse=True)
+    sort_keys = {
+        "index": lambda r: r["index"] or 0,
+        "margin": lambda r: (r["real_margin"] if r["real_margin"] is not None else r["net"]) or 0,
+        "day_rate": lambda r: r["day_rate"] or 0,
+    }
+    ranked.sort(key=sort_keys.get(rank_by, sort_keys["margin"]), reverse=True)
+
+    # Projet le plus récemment saisi : cible des boutons de saisie rapide.
+    last_project = None
+    if aggregates:
+        last_id = max(aggregates, key=lambda k: aggregates[k]["last_date"] or "")
+        last_project = next((p for p in loggable if p["id"] == last_id), None)
+    if last_project is None and loggable:
+        last_project = loggable[0]
 
     entries_recent = db.entries_by_day((today - timedelta(days=21)).isoformat(), today.isoformat())
     missing = calc.missing_days(entries_recent, settings, absences, today)
@@ -240,14 +337,18 @@ def dashboard():
         settings,
     )
 
+    break_even = calc.break_even(settings, db.days_spent_between(year_start, today.isoformat()))
+
     return render_template(
         "dashboard.html",
-        cards=cards, ranked=ranked[:3], loggable=loggable,
+        cards=cards, ranked=ranked[:5], loggable=loggable, break_even=break_even,
+        rank_by=rank_by,
         capacity=capacity, capacity_summary=calc.capacity_summary(capacity),
         include_provisional=include_provisional,
         today_logged=db.today_summary(today.isoformat()),
         alerts=alerts, revenue=revenue, settings=settings,
-        tasks_by_project=db.list_all_active_tasks(),
+        last_project=last_project,
+        logged_today_pct=round(sum(r["total_pct"] for r in db.today_summary(today.isoformat())), 0),
     )
 
 
@@ -255,7 +356,7 @@ def dashboard():
 
 @app.route("/semaine")
 def week():
-    settings = db.get_settings()
+    settings = current_settings()
     try:
         offset = int(request.args.get("offset", 0))
     except ValueError:
@@ -263,7 +364,12 @@ def week():
     start = calc.week_monday(date.today()) + timedelta(weeks=offset)
     days = [start + timedelta(days=i) for i in range(7)]
 
-    projects = [p for p in db.list_projects() if p["status"] in ("provisional", "confirmed", "paused")]
+    # Un projet passé en « terminé » récemment reste saisissable : sinon,
+    # corriger un vendredi oublié imposait de le rouvrir, saisir, refermer.
+    recent_completed = (date.today() - timedelta(days=COMPLETED_GRACE_DAYS)).isoformat()
+    projects = [p for p in db.list_projects()
+                if p["status"] in ("provisional", "confirmed", "paused")
+                or (p["status"] == "completed" and (p["updated_at"] or "") >= recent_completed)]
     projects_by_id = {p["id"]: p for p in projects}
     tasks_by_project = db.list_all_active_tasks()
     task_name = db.task_names()
@@ -287,6 +393,24 @@ def week():
     for p in projects:
         if not any(k[0] == p["id"] for k in keys):
             keys.add((p["id"], None))
+
+    # Lignes demandées via l'URL (?extra=12:none). Elles n'existent que le
+    # temps de l'affichage : ajouter une ligne ne doit RIEN écrire en base.
+    # L'ancienne version insérait une saisie à 0,01 % pour matérialiser la
+    # ligne, ce qui faisait sortir le projet de l'état « pas commencé » et
+    # éteignait l'alerte « jour ouvré sans saisie » pour ce lundi.
+    extras = list(request.args.getlist("extra"))
+    if request.args.get("extra_project"):
+        extras.append(f"{request.args['extra_project']}:"
+                      f"{request.args.get('extra_task') or 'none'}")
+    extras = list(dict.fromkeys(extras))  # dédoublonne en gardant l'ordre
+
+    kept_extras = []
+    for raw in extras:
+        parsed = parse_grid_key(raw)
+        if parsed and parsed[0] in projects_by_id:
+            keys.add(parsed)
+            kept_extras.append(raw)
 
     def sort_key(key):
         """Trie par nom de projet puis par tâche. Les clés dont le projet
@@ -316,58 +440,78 @@ def week():
         "week.html", rows=rows, days=day_meta, day_totals=day_totals,
         week_total=week_total, offset=offset, projects=projects,
         tasks_by_project=tasks_by_project, start=start, end=days[-1],
-        settings=settings,
+        settings=settings, extras=kept_extras,
     )
+
+
+def parse_grid_key(raw):
+    """Décode une clé de ligne de grille « <project_id>:<task_id|none> ».
+    Renvoie None si la valeur est illisible."""
+    try:
+        project_raw, _, task_raw = (raw or "").partition(":")
+        project_id = int(project_raw)
+    except (TypeError, ValueError):
+        return None
+    task_id = None
+    if task_raw and task_raw != "none":
+        try:
+            task_id = int(task_raw)
+        except ValueError:
+            return None
+    return (project_id, task_id)
 
 
 @app.route("/semaine/enregistrer", methods=["POST"])
 def save_week():
-    settings = db.get_settings()
-    saved = 0
+    settings = current_settings()
+    offset = request.form.get("offset", 0)
+
+    # Toutes les cellules sont validées AVANT la moindre écriture, puis
+    # écrites en une seule transaction. Une cellule invalide n'annule pas
+    # seulement sa propre écriture : elle annule toute la semaine, pour que
+    # le message affiché corresponde à l'état réel de la base.
+    projects_by_id = {p["id"]: p for p in db.list_projects()}
+    cells = []
     try:
         for key, raw in request.form.items():
             if not key.startswith("cell-"):
                 continue
-            _, project_id, task_raw, day_iso = key.split("-", 3)
-            project = db.get_project(int(project_id))
+            try:
+                _, project_raw, task_raw, day_iso = key.split("-", 3)
+                project_id = int(project_raw)
+            except ValueError:
+                raise FormError("Une case de la grille porte un identifiant illisible.")
+
+            project = projects_by_id.get(project_id)
             if not project:
-                continue
-            raw = (raw or "").strip().replace(",", ".")
-            percent = float(raw) if raw else 0.0
+                continue  # projet supprimé entre l'affichage et l'envoi
+
+            # Validation de la date : sans elle, un nom de champ trafiqué
+            # écrivait une entrée à date invalide, et la fiche projet
+            # tombait en 500 — sur la seule page permettant de la supprimer.
+            day_iso = valid_date(day_iso, "Date de la grille")
+
+            value = (raw or "").strip().replace(",", ".")
+            percent = float(value) if value else 0.0
             if percent < 0 or percent > 300:
                 raise FormError("Un pourcentage doit être compris entre 0 et 300.")
+
             task_id = int(task_raw) if task_raw != "none" else None
-            db.set_day_total(project["id"], task_id, day_iso, percent,
-                             percent_to_hours(percent, project, settings))
-            saved += 1
+            cells.append((project_id, task_id, day_iso, percent,
+                          percent_to_hours(percent, project, settings)))
     except FormError as exc:
-        flash(str(exc), "error")
-    except (ValueError, AttributeError):
-        flash("Saisie invalide : seuls des nombres sont acceptés dans la grille.", "error")
-    else:
-        flash(f"Semaine enregistrée ({saved} case(s) traitée(s)).", "success")
-    return redirect(url_for("week", offset=request.form.get("offset", 0)))
-
-
-@app.route("/semaine/ligne", methods=["POST"])
-def add_week_row():
-    """Ajoute une ligne (projet, tâche) vide à la grille. La ligne n'existe
-    que parce qu'une case y sera saisie : on crée une entrée à 0 % le lundi
-    pour matérialiser la clé, supprimée d'elle-même si rien n'est saisi."""
-    try:
-        project_id = int(request.form.get("project_id"))
-    except (TypeError, ValueError):
-        flash("Projet invalide.", "error")
-        return redirect(url_for("week"))
-    task_raw = request.form.get("task_id") or "none"
-    task_id = int(task_raw) if task_raw != "none" else None
-    offset = request.form.get("offset", 0)
-    try:
-        start = calc.week_monday(date.today()) + timedelta(weeks=int(offset))
+        flash(f"{exc} Rien n'a été enregistré.", "error")
+        return redirect(url_for("week", offset=offset))
     except ValueError:
-        start = calc.week_monday(date.today())
-    db.set_day_total(project_id, task_id, start.isoformat(), 0.01, 0)
-    flash("Ligne ajoutée — saisis tes pourcentages puis enregistre.", "success")
+        # Uniquement les conversions float()/int() des valeurs de cellules :
+        # la validation en amont couvre le reste, donc plus besoin
+        # d'attraper AttributeError, qui masquait de vraies erreurs.
+        flash("Saisie invalide : seuls des nombres sont acceptés dans la grille. "
+              "Rien n'a été enregistré.", "error")
+        return redirect(url_for("week", offset=offset))
+
+    db.set_day_totals(cells)
+    flash(f"Semaine enregistrée ({len(cells)} case(s) traitée(s)).", "success")
     return redirect(url_for("week", offset=offset))
 
 
@@ -375,7 +519,7 @@ def add_week_row():
 
 @app.route("/entries", methods=["POST"])
 def create_entry():
-    settings = db.get_settings()
+    settings = current_settings()
     try:
         project = db.get_project(int(request.form.get("project_id") or 0))
         if not project:
@@ -393,7 +537,7 @@ def create_entry():
         flash("Saisie invalide.", "error")
     else:
         flash("Entrée ajoutée.", "success")
-    return redirect(request.form.get("next") or url_for("dashboard"))
+    return redirect(safe_next(request.form.get("next"), url_for("dashboard")))
 
 
 @app.route("/entries/<int:entry_id>/edit", methods=["GET", "POST"])
@@ -402,7 +546,7 @@ def edit_entry(entry_id):
     if not entry:
         abort(404)
     project = db.get_project(entry["project_id"])
-    settings = db.get_settings()
+    settings = current_settings()
 
     if request.method == "POST":
         try:
@@ -436,9 +580,84 @@ def delete_entry(entry_id):
 
 # ------------------------------------------------------------- planning
 
+@app.route("/jour")
+def day_view():
+    """Saisie d'une seule journée, une carte par projet.
+
+    La grille hebdo fait neuf colonnes de champs numériques en scroll
+    horizontal : impraticable sur téléphone, alors que la saisie du soir sur
+    mobile est justement le cas d'usage principal.
+    """
+    settings = current_settings()
+    try:
+        day = calc.parse_date(request.args.get("date") or date.today().isoformat())
+    except ValueError:
+        day = date.today()
+
+    projects = [p for p in db.list_projects()
+                if p["status"] in ("provisional", "confirmed", "paused")]
+    cells = db.week_grid_cells(day.isoformat(), day.isoformat())
+    # La vue jour n'édite QUE la part « sans tâche ». Le temps rattaché à
+    # une tâche est affiché à côté, en lecture seule : sinon, réenregistrer
+    # un total qui inclut déjà des saisies par tâche les aurait doublées.
+    rows = []
+    for p in projects:
+        own = cells.get((p["id"], None), {}).get(day.isoformat(), 0)
+        tagged = sum(v.get(day.isoformat(), 0)
+                     for (pid, task_id), v in cells.items()
+                     if pid == p["id"] and task_id is not None)
+        rows.append({"project": p, "pct": round(own, 0), "tagged": round(tagged, 0)})
+
+    absence_index = calc.build_absence_index(db.list_absences())
+
+    return render_template(
+        "day.html", day=day, rows=rows,
+        total=round(sum(r["pct"] + r["tagged"] for r in rows), 0),
+        off_reason=(None if calc.is_working_day(day, settings, absence_index)
+                    else (absence_index.get(day) or "week-end")),
+        prev_day=(day - timedelta(days=1)).isoformat(),
+        next_day=(day + timedelta(days=1)).isoformat(),
+        weekday=WEEKDAY_NAMES[day.weekday()],
+    )
+
+
+@app.route("/jour/enregistrer", methods=["POST"])
+def save_day():
+    settings = current_settings()
+    try:
+        day_iso = valid_date(request.form.get("date"), "Date")
+    except FormError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("day_view"))
+
+    projects_by_id = {p["id"]: p for p in db.list_projects()}
+    cells = []
+    try:
+        for key, raw in request.form.items():
+            if not key.startswith("day-"):
+                continue
+            project = projects_by_id.get(int(key[4:]))
+            if not project:
+                continue
+            value = (raw or "").strip().replace(",", ".")
+            percent = float(value) if value else 0.0
+            if percent < 0 or percent > 300:
+                raise FormError("Un pourcentage doit être compris entre 0 et 300.")
+            cells.append((project["id"], None, day_iso, percent,
+                          percent_to_hours(percent, project, settings)))
+    except (FormError, ValueError) as exc:
+        message = str(exc) if isinstance(exc, FormError) else "Saisie invalide."
+        flash(f"{message} Rien n'a été enregistré.", "error")
+        return redirect(url_for("day_view", date=day_iso))
+
+    db.set_day_totals(cells)
+    flash("Journée enregistrée.", "success")
+    return redirect(url_for("day_view", date=day_iso))
+
+
 @app.route("/planning")
 def planning():
-    settings = db.get_settings()
+    settings = current_settings()
     include_provisional = request.args.get("include_provisional", "1") != "0"
     try:
         offset = int(request.args.get("offset", 0))
@@ -449,7 +668,7 @@ def planning():
 
     all_p = db.list_projects()
     projects = [p for p in all_p if p["status"] in ("provisional", "confirmed", "paused")]
-    rows = calc.gantt_rows(projects, window_start, PLANNING_WINDOW_DAYS)
+    rows = calc.gantt_rows(projects, window_start, PLANNING_WINDOW_DAYS, settings)
     absences = db.list_absences()
     capacity = calc.daily_capacity(all_p, window_start, PLANNING_WINDOW_DAYS,
                                    include_provisional, settings, absences)
@@ -465,7 +684,7 @@ def planning():
         week_labels=week_labels, include_provisional=include_provisional,
         offset=offset, window_start=window_start,
         window_end=window_start + timedelta(days=PLANNING_WINDOW_DAYS - 1),
-        absences=db.list_absences(upcoming_only=True, today_iso=date.today().isoformat()),
+        absences=[a for a in absences if a["end_date"] >= date.today().isoformat()],
     )
 
 
@@ -473,7 +692,7 @@ def planning():
 
 @app.route("/projects")
 def projects_list():
-    settings = db.get_settings()
+    settings = current_settings()
     status_filter = request.args.get("status", "all")
     search = (request.args.get("q") or "").strip()
     client = request.args.get("client") or None
@@ -510,23 +729,30 @@ def project_detail(project_id):
     project = db.get_project(project_id)
     if not project:
         abort(404)
-    settings = db.get_settings()
+    settings = current_settings()
     agg = db.entries_aggregate_for(project_id)
     costs = db.list_costs(project_id)
-    costs_total = sum(c["amount"] for c in costs)
+    cost_split = {
+        "absorbed": sum(c["amount"] for c in costs if not c["billable"]),
+        "rebilled": sum(c["amount"] for c in costs if c["billable"]),
+    }
     milestones = db.list_milestones(project_id)
     milestone_totals = db.milestone_totals_by_project().get(
         project_id, {"total": 0, "invoiced": 0, "paid": 0})
 
-    stats = calc.project_stats(project, agg, settings, costs_total, milestone_totals)
+    stats = calc.project_stats(project, agg, settings, cost_split, milestone_totals)
 
     try:
         page = max(1, int(request.args.get("page", 1)))
     except ValueError:
         page = 1
-    total_entries = db.count_entries(project_id)
+    date_from = (request.args.get("from") or "").strip() or None
+    date_to = (request.args.get("to") or "").strip() or None
+    task_filter = (request.args.get("task") or "").strip() or None
+    total_entries = db.count_entries(project_id, date_from, date_to, task_filter)
     entries = db.list_entries(project_id, limit=ENTRIES_PER_PAGE,
-                              offset=(page - 1) * ENTRIES_PER_PAGE)
+                              offset=(page - 1) * ENTRIES_PER_PAGE,
+                              date_from=date_from, date_to=date_to, task_id=task_filter)
 
     return render_template(
         "project_detail.html",
@@ -540,6 +766,7 @@ def project_detail(project_id):
         milestones=milestones, costs=costs,
         scope_changes=db.list_scope_changes(project_id),
         page=page, total_entries=total_entries,
+        date_from=date_from, date_to=date_to, task_filter=task_filter,
         total_pages=max(1, -(-total_entries // ENTRIES_PER_PAGE)),
         settings=settings,
     )
@@ -576,6 +803,18 @@ def change_status(project_id):
     else:
         flash("Statut mis à jour.", "success")
     return redirect(url_for("project_detail", project_id=project_id))
+
+
+@app.route("/projects/<int:project_id>/duplicate", methods=["POST"])
+def duplicate_project(project_id):
+    source = db.get_project(project_id)
+    if not source:
+        abort(404)
+    # Démarrage préréglé au lendemain de la fin du projet source.
+    start = (calc.planned_end_date(source) + timedelta(days=1)).isoformat()
+    new_id = db.duplicate_project(project_id, start)
+    flash("Projet reconduit — vérifie les dates et le prix avant de confirmer.", "success")
+    return redirect(url_for("edit_project", project_id=new_id))
 
 
 @app.route("/projects/<int:project_id>/archive", methods=["POST"])
@@ -655,7 +894,7 @@ def delete_task(task_id):
 
 @app.route("/facturation")
 def billing():
-    settings = db.get_settings()
+    settings = current_settings()
     today = date.today()
     milestones = db.list_milestones()
     projects = db.list_projects()
@@ -677,10 +916,16 @@ def billing():
         settings,
     )
 
+    delays = db.payment_delays()
+    forecast = calc.cash_forecast(db.open_milestones(), delays, months=3, today=today)
+    monthly = db.monthly_invoiced(12)
+
     return render_template(
         "billing.html", buckets=buckets, totals=totals, overdue=overdue,
-        revenue=revenue, chart=calc.bar_chart(db.monthly_invoiced(12), "amount"),
-        monthly=db.monthly_invoiced(12), settings=settings,
+        revenue=revenue, chart=calc.bar_chart(monthly, "amount"),
+        monthly=monthly, settings=settings,
+        forecast=forecast, delays=delays,
+        default_delay=calc.DEFAULT_PAYMENT_DELAY,
     )
 
 
@@ -706,12 +951,36 @@ def milestone_status(milestone_id):
     if not milestone:
         abort(404)
     try:
+        dated = (request.form.get("dated") or "").strip() or None
+        if dated:
+            dated = valid_date(dated, "Date")
         db.set_milestone_status(milestone_id, request.form.get("status", ""),
-                                (request.form.get("invoice_ref") or "").strip() or None)
-    except ValueError as exc:
+                                (request.form.get("invoice_ref") or "").strip() or None,
+                                dated=dated)
+    except (ValueError, FormError) as exc:
         flash(str(exc), "error")
-    return redirect(request.form.get("next")
-                    or url_for("project_detail", project_id=milestone["project_id"]))
+    return redirect(safe_next(request.form.get("next"),
+                              url_for("project_detail", project_id=milestone["project_id"])))
+
+
+@app.route("/milestones/<int:milestone_id>/edit", methods=["POST"])
+def edit_milestone(milestone_id):
+    milestone = db.get_milestone(milestone_id)
+    if not milestone:
+        abort(404)
+    try:
+        db.update_milestone(
+            milestone_id,
+            req_text(request.form, "label", "Libellé du jalon", 120),
+            req_float(request.form, "amount", "Montant", minimum=0),
+            (request.form.get("due_date") or "").strip() or None,
+        )
+    except FormError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("Jalon modifié.", "success")
+    return redirect(safe_next(request.form.get("next"),
+                              url_for("project_detail", project_id=milestone["project_id"])))
 
 
 @app.route("/milestones/<int:milestone_id>/delete", methods=["POST"])
@@ -721,8 +990,8 @@ def delete_milestone(milestone_id):
         abort(404)
     db.delete_milestone(milestone_id)
     flash("Jalon supprimé.", "success")
-    return redirect(request.form.get("next")
-                    or url_for("project_detail", project_id=milestone["project_id"]))
+    return redirect(safe_next(request.form.get("next"),
+                              url_for("project_detail", project_id=milestone["project_id"])))
 
 
 # ------------------------------------------------------------- coûts
@@ -735,6 +1004,7 @@ def create_cost(project_id):
             req_text(request.form, "label", "Libellé du coût", 120),
             req_float(request.form, "amount", "Montant", minimum=0),
             (request.form.get("cost_date") or "").strip() or None,
+            billable=request.form.get("billable") == "1",
         )
     except FormError as exc:
         flash(str(exc), "error")
@@ -756,17 +1026,20 @@ def delete_cost(cost_id):
 
 @app.route("/clients")
 def clients():
-    settings = db.get_settings()
+    settings = current_settings()
     rows = project_rows(db.list_projects(), settings)
-    return render_template("clients.html",
-                           clients=calc.client_rollup(rows, db.milestone_totals_by_project()))
+    return render_template(
+        "clients.html",
+        clients=calc.client_rollup(rows, db.milestone_totals_by_project(), settings),
+        cost_day_rate=calc.cost_day_rate(settings),
+    )
 
 
 # ------------------------------------------------------------- comparatif
 
 @app.route("/comparatif")
 def comparatif():
-    settings = db.get_settings()
+    settings = current_settings()
     tab = request.args.get("tab", "rentabilite")
     rows = project_rows(db.list_projects(), settings)
     # Les projets sans indice fiable passent en fin de liste plutôt que de
@@ -813,6 +1086,24 @@ def absences():
                            settings=db.get_settings())
 
 
+@app.route("/absences/jour", methods=["POST"])
+def mark_day_off():
+    """Déclare une journée non travaillée en un clic.
+
+    Sert à clore l'alerte « jour ouvré sans saisie » pour un jour où il n'y
+    avait effectivement rien à saisir. Une alerte qui revient chaque jour
+    sans moyen de la traiter est une alerte qu'on apprend à ignorer.
+    """
+    try:
+        day = req_date(request.form, "date", "Date")
+        db.create_absence("Journée non travaillée", "indispo", day, day)
+    except (FormError, ValueError) as exc:
+        flash(str(exc), "error")
+    else:
+        flash(f"Journée du {day} déclarée non travaillée.", "success")
+    return redirect(safe_next(request.form.get("next"), url_for("dashboard")))
+
+
 @app.route("/absences/<int:absence_id>/delete", methods=["POST"])
 def delete_absence(absence_id):
     db.delete_absence(absence_id)
@@ -851,13 +1142,19 @@ def settings_page():
                            req_float(request.form, "monthly_revenue_goal", "Objectif mensuel", 0, default=0))
             db.set_setting("annual_revenue_goal",
                            req_float(request.form, "annual_revenue_goal", "Objectif annuel", 0, default=0))
+            db.set_setting("annual_fixed_costs",
+                           req_float(request.form, "annual_fixed_costs", "Charges fixes annuelles", 0, default=0))
+            db.set_setting("billable_days_per_year",
+                           req_float(request.form, "billable_days_per_year", "Jours facturables par an", 1, 366, default=180))
+            db.set_setting("overrun_weeks",
+                           req_float(request.form, "overrun_weeks", "Prolongation maximale", 0, 52, default=4))
         except FormError as exc:
             flash(str(exc), "error")
         else:
             flash("Réglages enregistrés.", "success")
         return redirect(url_for("settings_page"))
 
-    settings = db.get_settings()
+    settings = current_settings()
     return render_template("settings.html", settings=settings,
                            working_days=calc.working_days_set(settings),
                            weekday_names=WEEKDAY_NAMES)
@@ -887,6 +1184,11 @@ def export(kind):
         "entries": (db.export_entries, f"timing-saisies-{stamp}.csv"),
         "projects": (db.export_projects, f"timing-projets-{stamp}.csv"),
         "milestones": (db.export_milestones, f"timing-facturation-{stamp}.csv"),
+        # Un générateur de PDF maison serait hors-jeu d'ici 2027 avec la
+        # facturation électronique obligatoire au format structuré. Le bon
+        # investissement est que Timing reste la source de vérité et exporte
+        # proprement vers l'outil qui émettra.
+        "to-invoice": (db.export_to_invoice, f"timing-a-facturer-{stamp}.csv"),
     }
     if kind not in exporters:
         abort(404)
@@ -896,11 +1198,28 @@ def export(kind):
 
 @app.route("/export/backup")
 def backup():
-    """Copie brute du fichier SQLite — la seule sauvegarde qui restaure
-    absolument tout, y compris ce qu'aucun export CSV ne couvre."""
+    """Sauvegarde complète et cohérente de la base.
+
+    Passe par sqlite3.Connection.backup() plutôt que d'envoyer le fichier
+    principal tel quel : en mode WAL, les transactions récentes vivent dans
+    le fichier -wal et n'auraient pas été incluses. La sauvegarde téléchargée
+    aurait pu être en retard sur la base réelle.
+    """
     if not db.DB_PATH.exists():
         abort(404)
-    return send_file(db.DB_PATH, as_attachment=True,
+    handle = tempfile.NamedTemporaryFile(suffix=".sqlite3", delete=False)
+    handle.close()
+    db.backup_to(handle.name)
+
+    @after_this_request
+    def _cleanup(response):
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+        return response
+
+    return send_file(handle.name, as_attachment=True, mimetype="application/vnd.sqlite3",
                      download_name=f"timing-sauvegarde-{date.today().isoformat()}.sqlite3")
 
 

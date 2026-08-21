@@ -35,7 +35,7 @@
 <section class="card section-gap">
   <div class="grid-scroll">
   <table class="entries">
-    <thead><tr><th>Client</th><th>Projets</th><th>CA vendu</th><th>Facturé</th><th>Jours vendus</th><th>Jours passés</th><th>Vendu / jour</th><th>Marge / jour</th></tr></thead>
+    <thead><tr><th>Client</th><th>Projets</th><th>CA vendu</th><th>Facturé</th><th>Jours vendus</th><th>Jours passés</th><th>Vendu / jour</th><th>Marge / jour</th>{% if cost_day_rate %}<th>Marge réelle</th>{% endif %}</tr></thead>
     <tbody>
       {% for c in clients %}
       <tr>
@@ -46,16 +46,29 @@
         <td class="mono">{{ c.days_sold }}</td>
         <td class="mono">{{ c.days_spent }}</td>
         <td class="mono">{% if c.sold_day_rate %}{{ '%.0f'|format(c.sold_day_rate) }}{{ currency }}{% else %}—{% endif %}</td>
-        <td class="mono">{% if c.real_day_rate %}{{ '%.0f'|format(c.real_day_rate) }}{{ currency }}{% else %}—{% endif %}</td>
+        <td class="mono">
+          {% if c.real_day_rate %}{{ '%.0f'|format(c.real_day_rate) }}{{ currency }}{% if c.partial %} <span class="tag-pill">partiel</span>{% endif %}
+          {% else %}<span class="faint">pas assez avancé</span>{% endif %}
+        </td>
+        {% if cost_day_rate %}
+        <td class="mono">
+          {% if c.real_margin is not none %}<span class="{{ 'negative-num' if c.real_margin < 0 }}">{{ '%.0f'|format(c.real_margin) }}{{ currency }}</span>
+          {% else %}—{% endif %}
+        </td>
+        {% endif %}
       </tr>
       {% endfor %}
     </tbody>
   </table>
   </div>
   <p class="faint" style="margin-top: var(--space-3);">
-    « Marge / jour » = (CA vendu − coûts directs) ÷ jours réellement passés.
-    S'il est bien en dessous du « vendu / jour », ce client te coûte plus de
-    temps que tu ne lui en as vendu.
+    « Marge / jour » = (CA vendu + frais refacturés − coûts absorbés) ÷ jours
+    réellement passés, calculée sur les seuls projets assez avancés pour que
+    le chiffre veuille dire quelque chose — d'où l'étiquette « partiel » quand
+    certains projets du client en sont exclus. S'il est bien en dessous du
+    « vendu / jour », ce client te coûte plus de temps que tu ne lui en as vendu.
+    {% if cost_day_rate %}La « marge réelle » déduit en plus
+    {{ '%.0f'|format(cost_day_rate) }}{{ currency }} par jour de coût de revient.{% endif %}
   </p>
 </section>
 {% else %}

@@ -107,6 +107,10 @@ CREATE TABLE IF NOT EXISTS costs (
     label           TEXT NOT NULL,
     amount          REAL NOT NULL DEFAULT 0,
     cost_date       TEXT,
+    -- Un frais refacturé au client s'AJOUTE au prix au lieu d'être déduit
+    -- de la marge. Les traiter tous comme des coûts sous-estimait le
+    -- revenu des projets avec déplacements ou achats refacturés.
+    billable        INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL
 );
 

@@ -53,7 +53,7 @@
 
         {% for row in rows %}
         <div class="gantt-row" style="grid-template-columns: repeat({{ window_days }}, 1fr);">
-          <div class="gantt-bar {{ 'is-provisional' if row.project.status == 'provisional' }} {{ 'is-paused' if row.project.status == 'paused' }} {{ 'clip-start' if row.clipped_start }} {{ 'clip-end' if row.clipped_end }}"
+          <div class="gantt-bar {{ 'is-provisional' if row.project.status == 'provisional' }} {{ 'is-paused' if row.project.status == 'paused' }} {{ 'is-overrun' if row.overrun }} {{ 'clip-start' if row.clipped_start }} {{ 'clip-end' if row.clipped_end }}"
                style="grid-column: {{ row.start_idx + 1 }} / {{ row.end_idx + 2 }}; background:{{ row.project.color }};"
                title="{{ row.project.name }} — {{ status_label[row.project.status] }}"></div>
         </div>
@@ -61,7 +61,7 @@
 
         <div class="gantt-row gantt-capacity" style="grid-template-columns: repeat({{ window_days }}, 1fr);">
           {% for day in capacity %}
-          <div class="day-cell level-{{ day.level }} {{ 'has-provisional' if day.has_provisional }} {{ 'is-today' if day.date.isoformat() == today }}"
+          <div class="day-cell level-{{ day.level }} {{ 'has-provisional' if day.has_provisional }} {{ 'has-overrun' if day.has_overrun }} {{ 'is-today' if day.date.isoformat() == today }}"
                data-date="{{ day.date.strftime('%a %d %b') }}" data-pct="{{ day.pct_total }}"
                data-off="{{ day.off_reason or '' }}"
                data-contributors='{{ day.contributors|tojson }}'></div>
@@ -79,6 +79,7 @@
   <span><span class="swatch" style="background: var(--load-heavy-bg); border:1px solid var(--load-heavy);"></span>chargé</span>
   <span><span class="swatch" style="background: var(--load-storm-bg); border:1px solid var(--load-storm);"></span>tempête</span>
   <span><span class="swatch swatch-off"></span>non travaillé</span>
+  <span><span class="swatch swatch-overrun"></span>projet prolongé</span>
   <span>barre hachurée = projet provisoire</span>
 </div>
 {% else %}

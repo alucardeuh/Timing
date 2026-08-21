@@ -179,7 +179,8 @@ h3 { font-size: 15.5px; }
 .pill-completed { background: #E9ECEF; color: var(--text-faint); }
 
 .status-ahead .stat-badge, .stat-badge.status-ahead { background: var(--load-light-bg); color: #1F5F54; }
-.status-on_track .stat-badge, .stat-badge.status-on_track { background: var(--load-heavy-bg); color: #7A5217; }
+.status-on_track .stat-badge, .stat-badge.status-on_track { background: var(--accent-light); color: var(--accent-text); }
+.status-tight .stat-badge, .stat-badge.status-tight { background: var(--load-heavy-bg); color: #7A5217; }
 .status-behind .stat-badge, .stat-badge.status-behind { background: var(--load-storm-bg); color: #7A2233; }
 .stat-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 100px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
 .stat-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -191,7 +192,8 @@ h3 { font-size: 15.5px; }
 .tally-seg { flex: 1; min-width: 3px; background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 1px; position: relative; overflow: hidden; }
 .tally-seg .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; }
 .status-ahead .tally-seg .fill { background: var(--load-light); }
-.status-on_track .tally-seg .fill { background: var(--load-heavy); }
+.status-on_track .tally-seg .fill { background: var(--accent); }
+.status-tight .tally-seg .fill { background: var(--load-heavy); }
 .status-behind .tally-seg .fill { background: var(--load-storm); }
 .tally-labels { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
 
@@ -333,6 +335,7 @@ table.entries tr:hover td { background: var(--panel-2); }
 .progress-fill { height: 100%; border-radius: 6px 0 0 6px; transition: width .2s ease; }
 .status-fill-ahead { background: var(--load-light); }
 .status-fill-on_track { background: var(--load-heavy); }
+.status-fill-tight { background: var(--load-heavy); }
 .status-fill-behind { background: var(--load-storm); }
 .status-fill-not_started { background: var(--border); }
 .progress-marker { position: absolute; top: -2px; bottom: -2px; width: 2px;
@@ -458,3 +461,55 @@ table.entries tr:hover td { background: var(--panel-2); }
   .main { padding: var(--space-4); }
   .week-grid td.wg-project { display: table-cell; }
 }
+
+/* Dépassement : un projet non terminé qui déborde de sa fin prévue --------
+   Hachures verticales, visuellement distinctes des hachures à 45° du
+   provisoire : les deux peuvent coexister sur un même jour. */
+.day-cell.has-overrun { background-image: repeating-linear-gradient(90deg, rgba(192,69,90,.22) 0 2px, transparent 2px 6px); }
+.gantt-bar.is-overrun { background-image: repeating-linear-gradient(90deg, rgba(255,255,255,.45) 0 2px, transparent 2px 6px); }
+.gantt-planned-end { position: absolute; top: 6px; bottom: 6px; width: 2px; background: var(--danger); opacity: .6; }
+.swatch-overrun { background-color: var(--panel-2); border: 1px solid var(--danger);
+                  background-image: repeating-linear-gradient(90deg, rgba(192,69,90,.3) 0 2px, transparent 2px 6px); }
+
+/* Jalons éditables en ligne ------------------------------------------- */
+.milestone-row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; padding: var(--space-1) 0; }
+.milestone-edit, .milestone-action { display: flex; gap: 6px; align-items: center; }
+
+/* Vue jour (pensée pour le mobile) ------------------------------------ */
+.day-card { margin-bottom: var(--space-3); }
+.day-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: var(--space-3); font-size: 14.5px; }
+.day-input { width: 100%; font-family: var(--font-mono); font-size: 26px; text-align: center;
+             padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm);
+             background: #fff; color: var(--text); }
+.day-input:focus { border-color: var(--accent); outline: none; }
+.day-presets { display: flex; gap: var(--space-2); margin-top: var(--space-3); flex-wrap: wrap; }
+.day-preset { flex: 1; justify-content: center; min-width: 62px; }
+
+/* Saisie en un geste sur l'accueil ------------------------------------ */
+.oneshot { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;
+           padding-bottom: var(--space-3); margin-bottom: var(--space-3);
+           border-bottom: 1px solid var(--border-soft); }
+.oneshot-label { font-size: 13.5px; color: var(--text-muted); margin-right: auto; }
+.oneshot form { display: inline; }
+.alert-action { margin-left: auto; }
+
+/* Seuil de rentabilité ------------------------------------------------ */
+.break-even { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--border-soft); }
+.goal-lg { height: 10px; border-radius: 5px; }
+.negative-num { color: var(--danger); }
+
+/* Prévisionnel d'encaissement ----------------------------------------- */
+.forecast-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-4); }
+.forecast-month { padding: var(--space-3); background: var(--panel-2); border-radius: var(--radius-sm); }
+.forecast-amount { font-family: var(--font-mono); font-size: 22px; font-weight: 600; }
+.forecast-items { list-style: none; margin: var(--space-3) 0 0; padding: 0; font-size: 12.5px; }
+.forecast-items li { display: flex; justify-content: space-between; gap: var(--space-2);
+                     padding: 5px 0; border-bottom: 1px solid var(--border-soft); }
+.forecast-items li:last-child { border-bottom: none; }
+
+/* Classement : tri au choix, montant à côté du ratio ------------------- */
+.rank-switch { display: flex; gap: var(--space-2); align-items: center; font-size: 12.5px;
+               margin-bottom: var(--space-3); }
+.rank-switch a { padding: 3px 9px; border-radius: 100px; color: var(--text-muted); text-decoration: none; }
+.rank-switch a.is-active { background: var(--accent-light); color: var(--accent-text); font-weight: 500; }
+.rank-amount { margin-left: auto; padding-right: var(--space-3); color: var(--text-muted); font-size: 13px; }

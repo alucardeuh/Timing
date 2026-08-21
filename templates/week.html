@@ -16,6 +16,7 @@
 
 {% if rows %}
 <form method="post" action="{{ url_for('save_week') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 <input type="hidden" name="offset" value="{{ offset }}">
 <section class="card">
   <div class="grid-scroll">
@@ -75,17 +76,18 @@
 
 <section class="card section-gap">
   <div class="card-title-row"><h3>Ajouter une ligne</h3></div>
-  <form method="post" action="{{ url_for('add_week_row') }}" class="quick-add">
+  <form method="get" action="{{ url_for('week') }}" class="quick-add">
     <input type="hidden" name="offset" value="{{ offset }}">
+    {% for e in extras %}<input type="hidden" name="extra" value="{{ e }}">{% endfor %}
     <div class="field field-project">
       <label for="row-project">Projet</label>
-      <select id="row-project" name="project_id" required>
+      <select id="row-project" name="extra_project" required>
         {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
       </select>
     </div>
     <div class="field field-project">
       <label for="row-task">Tâche</label>
-      <select id="row-task" name="task_id">
+      <select id="row-task" name="extra_task">
         <option value="none">Sans tâche</option>
         {% for pid, tasks in tasks_by_project.items() %}
           {% for t in tasks %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}

@@ -41,6 +41,7 @@ SETTINGS = {
     "peak_threshold_danger": 100.0,
     "working_days": "0,1,2,3,4",
     "min_consumption_pct": 20.0,
+    "min_projection_elapsed_pct": 10.0,
     "budget_alert_pct": 80.0,
     "monthly_revenue_goal": 0.0,
     "annual_revenue_goal": 0.0,
