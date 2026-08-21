@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Facturation — Timing{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Argent</p>
+    <h1>Facturation</h1>
+  </div>
+  <a href="{{ url_for('export', kind='milestones') }}" class="btn btn-ghost btn-sm">Exporter en CSV</a>
+</div>
+
+<section class="card">
+  <div class="stat-strip">
+    <div class="stat">
+      <div class="stat-num">{{ '{:,.0f}'.format(revenue.invoiced_month)|replace(',', ' ') }}{{ currency }}</div>
+      <div class="stat-label">Facturé ce mois</div>
+      {% if revenue.monthly_pct is not none %}
+      <div class="goal-track"><div class="goal-fill" style="width: {{ [revenue.monthly_pct, 100]|min }}%;"></div></div>
+      <div class="faint">{{ revenue.monthly_pct }}% de {{ '%.0f'|format(revenue.monthly_goal) }}{{ currency }}</div>
+      {% endif %}
+    </div>
+    <div class="stat">
+      <div class="stat-num">{{ '{:,.0f}'.format(revenue.invoiced_year)|replace(',', ' ') }}{{ currency }}</div>
+      <div class="stat-label">Facturé cette année</div>
+      {% if revenue.annual_pct is not none %}
+      <div class="goal-track"><div class="goal-fill" style="width: {{ [revenue.annual_pct, 100]|min }}%;"></div></div>
+      <div class="faint">{{ revenue.annual_pct }}% de {{ '%.0f'|format(revenue.annual_goal) }}{{ currency }}</div>
+      {% endif %}
+    </div>
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(totals.todo) }}{{ currency }}</div><div class="stat-label">À facturer</div></div>
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(totals.invoiced) }}{{ currency }}</div><div class="stat-label">Facturé, en attente</div></div>
+    <div class="stat"><div class="stat-num">{{ '{:,.0f}'.format(revenue.backlog)|replace(',', ' ') }}{{ currency }}</div><div class="stat-label">Carnet de commandes</div></div>
+  </div>
+</section>
+
+{% if overdue %}
+<section class="card section-gap">
+  <div class="card-title-row"><h3>En retard</h3></div>
+  <ul class="alert-list">
+    {% for m in overdue %}
+    <li class="alert alert-danger"><span class="alert-dot"></span>
+      {{ m.label }} — {{ m.project_name }} · <span class="mono">{{ '%.0f'|format(m.amount) }}{{ currency }}</span> · échéance {{ m.due_date }}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if monthly %}
+<section class="card section-gap">
+  <div class="card-title-row"><h3>CA facturé par mois</h3></div>
+  <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" class="barchart">
+    {% for b in chart.bars %}
+    <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="3"></rect>
+    <text x="{{ b.label_x }}" y="{{ chart.height - 10 }}" text-anchor="middle" class="bar-label">{{ b.label }}</text>
+    {% endfor %}
+  </svg>
+</section>
+{% endif %}
+
+{% for key, title in [('todo', 'À facturer'), ('invoiced', 'Facturé, en attente de paiement'), ('paid', 'Encaissé')] %}
+<section class="card section-gap">
+  <div class="card-title-row"><h3>{{ title }}</h3><span class="mono faint">{{ '%.0f'|format(totals[key]) }}{{ currency }}</span></div>
+  {% if buckets[key] %}
+  <table class="entries">
+    <thead><tr><th>Jalon</th><th>Projet</th><th>Client</th><th>Montant</th><th>Échéance</th><th>Réf.</th><th></th></tr></thead>
+    <tbody>
+      {% for m in buckets[key] %}
+      <tr>
+        <td>{{ m.label }}</td>
+        <td><a href="{{ url_for('project_detail', project_id=m.project_id) }}" class="cell-link"><span class="pcard-color-dot" style="background:{{ m.project_color }};"></span>{{ m.project_name }}</a></td>
+        <td>{{ m.project_client or '—' }}</td>
+        <td class="mono">{{ '%.0f'|format(m.amount) }}{{ currency }}</td>
+        <td class="mono {{ 'overdue' if key == 'todo' and m.due_date and m.due_date <= today }}">{{ m.due_date or '—' }}</td>
+        <td class="mono">{{ m.invoice_ref or '—' }}</td>
+        <td class="row-actions">
+          {% if key == 'todo' %}
+          <form method="post" action="{{ url_for('milestone_status', milestone_id=m.id) }}" class="inline-form">
+            <input type="hidden" name="status" value="invoiced">
+            <input type="hidden" name="next" value="{{ url_for('billing') }}">
+            <input type="text" name="invoice_ref" placeholder="n° facture" class="mini-input">
+            <button type="submit" class="btn btn-ghost btn-sm">Facturé</button>
+          </form>
+          {% elif key == 'invoiced' %}
+          <form method="post" action="{{ url_for('milestone_status', milestone_id=m.id) }}" class="inline-form">
+            <input type="hidden" name="status" value="paid">
+            <input type="hidden" name="next" value="{{ url_for('billing') }}">
+            <button type="submit" class="btn btn-ghost btn-sm">Encaissé</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="faint">Rien dans cette colonne.</p>
+  {% endif %}
+</section>
+{% endfor %}
+{% endblock %}

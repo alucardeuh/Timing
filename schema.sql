@@ -1,20 +1,44 @@
--- Timing V2 — schéma de base de données
+-- Timing — schéma de base de données
+--
+-- Convention : toute création de table est idempotente (IF NOT EXISTS), et
+-- l'ajout de colonnes sur une base déjà existante est géré par la migration
+-- légère de db.py (voir MIGRATIONS). Ce fichier décrit l'état CIBLE du
+-- schéma ; db.py se charge d'y amener une base plus ancienne sans perte.
 
 CREATE TABLE IF NOT EXISTS projects (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT NOT NULL,
     client          TEXT,
-    status          TEXT NOT NULL DEFAULT 'provisional', -- provisional | confirmed | paused | completed
+
+    -- provisional : vendu mais pas signé. N'entre dans la charge que si on
+    -- demande explicitement à l'inclure, jamais dans le CA réalisé.
+    status          TEXT NOT NULL DEFAULT 'provisional'
+                     CHECK (status IN ('provisional', 'confirmed', 'paused', 'completed')),
+
     days_per_week   REAL NOT NULL,
     duration_value  REAL NOT NULL,
-    duration_unit   TEXT NOT NULL DEFAULT 'weeks',        -- weeks | months
+    duration_unit   TEXT NOT NULL DEFAULT 'weeks'
+                     CHECK (duration_unit IN ('weeks', 'months')),
+
     day_rate        REAL,
-    price_total     REAL NOT NULL,
+    price_total     REAL NOT NULL DEFAULT 0,
+
+    -- NULL = utilise le réglage global. Ne sert plus qu'à convertir des
+    -- jours en heures pour l'affichage : la consommation réelle est
+    -- comptée en % de journée (voir entries.percent_of_day), donc changer
+    -- cette valeur ne réécrit plus l'historique.
     hours_per_day   REAL,
+
     start_date      TEXT NOT NULL,
     color           TEXT NOT NULL DEFAULT '#3E8E82',
     notes           TEXT,
-    created_at      TEXT NOT NULL
+
+    -- Corbeille : un projet supprimé est d'abord archivé (réversible).
+    -- La suppression définitive n'est possible que depuis l'onglet Corbeille.
+    archived        INTEGER NOT NULL DEFAULT 0,
+
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -30,10 +54,73 @@ CREATE TABLE IF NOT EXISTS entries (
     project_id      INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     task_id         INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
     entry_date      TEXT NOT NULL,
+
+    -- LA source de vérité de la consommation. 50 = une demi-journée.
+    -- Indépendant de tout réglage : c'est ce qui garantit qu'un changement
+    -- d'heures/jour ne déforme pas rétroactivement le passé.
     percent_of_day  REAL NOT NULL,
-    hours           REAL NOT NULL,
+
+    -- Dérivé, conservé pour l'historique et les exports. Jamais utilisé
+    -- pour calculer des jours consommés.
+    hours           REAL NOT NULL DEFAULT 0,
+
     note            TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT
+);
+
+-- Congés, jours fériés, indisponibilités. Un jour couvert par une absence
+-- a une capacité nulle : il ne compte plus comme jour travaillé dans la
+-- carte de charge, et n'est jamais signalé comme "jour non saisi".
+CREATE TABLE IF NOT EXISTS absences (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    label           TEXT NOT NULL,
+    kind            TEXT NOT NULL DEFAULT 'conges'
+                     CHECK (kind IN ('conges', 'ferie', 'indispo')),
+    start_date      TEXT NOT NULL,
+    end_date        TEXT NOT NULL,
     created_at      TEXT NOT NULL
+);
+
+-- Jalons de facturation. La somme des jalons d'un projet devrait couvrir
+-- son prix total ; l'écart est affiché sur la fiche plutôt que corrigé
+-- d'office (un acompte non encore jalonné est un cas normal).
+CREATE TABLE IF NOT EXISTS milestones (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id      INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    label           TEXT NOT NULL,
+    amount          REAL NOT NULL DEFAULT 0,
+    due_date        TEXT,
+    status          TEXT NOT NULL DEFAULT 'todo'
+                     CHECK (status IN ('todo', 'invoiced', 'paid')),
+    invoice_ref     TEXT,
+    invoiced_at     TEXT,
+    paid_at         TEXT,
+    created_at      TEXT NOT NULL
+);
+
+-- Coûts directs imputés à un projet (sous-traitance, licence, déplacement).
+-- Sans eux, l'indice de rentabilité mesure la productivité, pas la marge.
+CREATE TABLE IF NOT EXISTS costs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id      INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    label           TEXT NOT NULL,
+    amount          REAL NOT NULL DEFAULT 0,
+    cost_date       TEXT,
+    created_at      TEXT NOT NULL
+);
+
+-- Historique de périmètre : chaque modification du volume vendu ou du prix
+-- laisse une ligne datée, au lieu d'écraser silencieusement l'ancienne
+-- valeur. C'est ce qui permet d'analyser ses dépassements après coup.
+CREATE TABLE IF NOT EXISTS scope_changes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id      INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    field           TEXT NOT NULL,
+    old_value       TEXT,
+    new_value       TEXT,
+    note            TEXT,
+    changed_at      TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -41,6 +128,18 @@ CREATE TABLE IF NOT EXISTS settings (
     value           TEXT NOT NULL
 );
 
+-- @INDEXES
+-- Tout ce qui suit est exécuté APRÈS les migrations.
+-- Un index peut porter sur une colonne ajoutée par migration (archived) ;
+-- le créer avant que la colonne existe échoue sur une base d'avant la V2.
 CREATE INDEX IF NOT EXISTS idx_entries_project ON entries(project_id);
 CREATE INDEX IF NOT EXISTS idx_entries_date ON entries(entry_date);
+-- Composite : sert la grille hebdo et les agrégats par projet sur une
+-- période, les deux requêtes les plus fréquentes de l'app.
+CREATE INDEX IF NOT EXISTS idx_entries_project_date ON entries(project_id, entry_date);
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
+CREATE INDEX IF NOT EXISTS idx_milestones_project ON milestones(project_id);
+CREATE INDEX IF NOT EXISTS idx_milestones_status ON milestones(status);
+CREATE INDEX IF NOT EXISTS idx_costs_project ON costs(project_id);
+CREATE INDEX IF NOT EXISTS idx_absences_dates ON absences(start_date, end_date);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status, archived);

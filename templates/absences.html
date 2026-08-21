@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Absences — Timing{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Congés, fériés, indisponibilités</p>
+    <h1>Absences</h1>
+  </div>
+</div>
+
+<section class="card">
+  <div class="card-title-row"><h3>Déclarer une absence</h3></div>
+  <form method="post" class="quick-add">
+    <div class="field field-note"><label>Libellé</label><input name="label" type="text" placeholder="Vacances d'été" required></div>
+    <div class="field field-project">
+      <label>Type</label>
+      <select name="kind">
+        <option value="conges">Congés</option>
+        <option value="ferie">Jour férié</option>
+        <option value="indispo">Indisponibilité</option>
+      </select>
+    </div>
+    <div class="field field-date"><label>Du</label><input name="start_date" type="date" value="{{ today }}" required></div>
+    <div class="field field-date"><label>Au</label><input name="end_date" type="date" value="{{ today }}" required></div>
+    <button type="submit" class="btn btn-primary">Enregistrer</button>
+  </form>
+  <p class="field-help-box">
+    Un jour couvert par une absence a une capacité nulle : il n'apparaît plus
+    comme chargé sur la carte, et ne compte jamais comme « jour ouvré sans
+    saisie ». C'est ce qui évite d'être alerté d'un oubli de saisie pendant
+    ses vacances.
+  </p>
+</section>
+
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Absences enregistrées</h3></div>
+  {% if absences %}
+  <table class="entries">
+    <thead><tr><th>Libellé</th><th>Type</th><th>Du</th><th>Au</th><th></th></tr></thead>
+    <tbody>
+      {% for a in absences %}
+      <tr>
+        <td>{{ a.label }}</td>
+        <td><span class="tag-pill">{{ absence_label[a.kind] }}</span></td>
+        <td class="mono">{{ a.start_date }}</td>
+        <td class="mono">{{ a.end_date }}</td>
+        <td>
+          <form method="post" action="{{ url_for('delete_absence', absence_id=a.id) }}" class="inline-form" onsubmit="return confirm('Supprimer cette absence ?');">
+            <button type="submit" class="btn btn-ghost btn-sm">Suppr.</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="faint">Aucune absence enregistrée.</p>
+  {% endif %}
+</section>
+{% endblock %}

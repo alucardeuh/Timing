@@ -9,34 +9,95 @@
   </div>
 </div>
 
-<section class="card" style="max-width: 480px;">
+<section class="card" style="max-width: 640px;">
   <form method="post">
     <div class="field">
-      <label for="default_hours_per_day">Heures / jour par défaut</label>
-      <input id="default_hours_per_day" name="default_hours_per_day" type="number" step="0.5" min="1"
-             value="{{ settings.default_hours_per_day }}">
-      <p class="field-hint">Sert à convertir un % de journée saisi en heures, et les jours vendus en heures vendues.</p>
+      <label>Jours travaillés</label>
+      <div class="checkbox-row">
+        {% for i in range(7) %}
+        <label class="checkbox-pill {{ 'is-checked' if i in working_days }}">
+          <input type="checkbox" name="working_days" value="{{ i }}" {{ 'checked' if i in working_days }}>
+          {{ weekday_names[i][:3] }}
+        </label>
+        {% endfor %}
+      </div>
+      <p class="field-hint">
+        C'est le diviseur de la carte de charge. Un projet vendu 5 jours par
+        semaine sur 5 jours travaillés remplit 100 % de chaque jour ouvré.
+        Répartir sur 7 jours diluerait la charge et rendrait les seuils
+        ci-dessous inatteignables.
+      </p>
     </div>
-    <div class="field">
-      <label for="currency_symbol">Devise</label>
-      <input id="currency_symbol" name="currency_symbol" type="text" maxlength="3" value="{{ settings.currency_symbol }}">
-    </div>
+
     <div class="field-row">
       <div class="field">
-        <label for="peak_threshold_warning">Seuil "chargé" (%)</label>
+        <label for="peak_threshold_warning">Seuil « chargé » (%)</label>
         <input id="peak_threshold_warning" name="peak_threshold_warning" type="number" step="5" min="1"
                value="{{ settings.peak_threshold_warning|int }}">
       </div>
       <div class="field">
-        <label for="peak_threshold_danger">Seuil "tempête" (%)</label>
+        <label for="peak_threshold_danger">Seuil « tempête » (%)</label>
         <input id="peak_threshold_danger" name="peak_threshold_danger" type="number" step="5" min="1"
                value="{{ settings.peak_threshold_danger|int }}">
       </div>
     </div>
-    <p class="field-hint" style="margin-top:-8px; margin-bottom: var(--space-4);">
-      Un jour où la charge cumulée dépasse ces seuils passe respectivement en ambre puis en rouge sur la carte de charge.
-    </p>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="default_hours_per_day">Heures / jour par défaut</label>
+        <input id="default_hours_per_day" name="default_hours_per_day" type="number" step="0.5" min="1"
+               value="{{ settings.default_hours_per_day }}">
+        <p class="field-hint">Affichage seulement : la consommation est comptée en % de journée, donc changer cette valeur ne modifie plus l'historique.</p>
+      </div>
+      <div class="field">
+        <label for="currency_symbol">Devise</label>
+        <input id="currency_symbol" name="currency_symbol" type="text" maxlength="3" value="{{ settings.currency_symbol }}">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="min_consumption_pct">Seuil de fiabilité de l'indice (%)</label>
+        <input id="min_consumption_pct" name="min_consumption_pct" type="number" step="5" min="0" max="100"
+               value="{{ settings.min_consumption_pct|int }}">
+        <p class="field-hint">En dessous de ce % de budget consommé, l'indice de rentabilité reste masqué.</p>
+      </div>
+      <div class="field">
+        <label for="budget_alert_pct">Alerte budget (%)</label>
+        <input id="budget_alert_pct" name="budget_alert_pct" type="number" step="5" min="1" max="200"
+               value="{{ settings.budget_alert_pct|int }}">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="monthly_revenue_goal">Objectif de CA mensuel ({{ currency }})</label>
+        <input id="monthly_revenue_goal" name="monthly_revenue_goal" type="number" step="100" min="0"
+               value="{{ settings.monthly_revenue_goal|int }}">
+      </div>
+      <div class="field">
+        <label for="annual_revenue_goal">Objectif de CA annuel ({{ currency }})</label>
+        <input id="annual_revenue_goal" name="annual_revenue_goal" type="number" step="1000" min="0"
+               value="{{ settings.annual_revenue_goal|int }}">
+      </div>
+    </div>
+
     <button type="submit" class="btn btn-primary">Enregistrer</button>
   </form>
+</section>
+
+<section class="card section-gap" style="max-width: 640px;">
+  <div class="card-title-row"><h3>Sauvegarde et export</h3></div>
+  <p class="muted">
+    L'export CSV sert à justifier ton temps à un client ou à alimenter ta
+    compta. La sauvegarde est une copie complète du fichier de base : c'est
+    elle qui restaure tout, y compris ce qu'aucun CSV ne couvre.
+  </p>
+  <div class="btn-row" style="margin-top: var(--space-4);">
+    <a href="{{ url_for('export', kind='entries') }}" class="btn btn-ghost btn-sm">Saisies (CSV)</a>
+    <a href="{{ url_for('export', kind='projects') }}" class="btn btn-ghost btn-sm">Projets (CSV)</a>
+    <a href="{{ url_for('export', kind='milestones') }}" class="btn btn-ghost btn-sm">Facturation (CSV)</a>
+    <a href="{{ url_for('backup') }}" class="btn btn-primary btn-sm">Sauvegarde complète</a>
+  </div>
 </section>
 {% endblock %}

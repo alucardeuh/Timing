@@ -16,8 +16,7 @@
   function computePreview() {
     const dpw = parseFloat(daysPerWeek.value) || 0;
     const dur = parseFloat(durationValue.value) || 0;
-    const unit = durationUnit.value;
-    const weeks = unit === "months" ? dur * WEEKS_PER_MONTH : dur;
+    const weeks = durationUnit.value === "months" ? dur * WEEKS_PER_MONTH : dur;
     const totalDays = Math.round(dpw * weeks * 100) / 100;
 
     previewDays.textContent = totalDays > 0 ? totalDays + " j" : "—";
@@ -25,12 +24,10 @@
     const rate = parseFloat(dayRate.value);
     const price = parseFloat(priceTotal.value);
     let total = null;
-    if (!isNaN(rate) && rate > 0) {
-      total = Math.round(rate * totalDays);
-    } else if (!isNaN(price) && price > 0) {
-      total = price;
-    }
-    previewPrice.textContent = total !== null ? total.toLocaleString("fr-FR") + " " : "—";
+    if (!isNaN(rate) && rate > 0) total = Math.round(rate * totalDays);
+    else if (!isNaN(price) && price > 0) total = price;
+
+    previewPrice.textContent = total !== null ? total.toLocaleString("fr-FR") : "—";
   }
 
   [daysPerWeek, durationValue, durationUnit, dayRate, priceTotal].forEach((el) => {
@@ -41,30 +38,74 @@
 })();
 
 (function capacityDayDetail() {
-  const detailBoxes = document.querySelectorAll("#day-detail");
-  if (!detailBoxes.length) return;
+  const box = document.getElementById("day-detail");
+  if (!box) return;
 
-  function renderDetail(box, dateLabel, pct, contributorsJson) {
-    let contributors = [];
-    try { contributors = JSON.parse(contributorsJson || "[]"); } catch (e) { contributors = []; }
+  // Tout est construit avec createElement + textContent, jamais innerHTML :
+  // les noms de projets viennent de la saisie utilisateur, et les injecter
+  // en HTML permettrait à un nom comme "<img onerror=...>" d'exécuter du
+  // script au simple survol d'un jour.
+  function renderDetail(cell) {
+    box.textContent = "";
 
-    if (!contributors.length) {
-      box.innerHTML = `<span class="dd-date">${dateLabel}</span> — journée libre`;
+    const dateSpan = document.createElement("span");
+    dateSpan.className = "dd-date";
+    dateSpan.textContent = cell.dataset.date;
+    box.appendChild(dateSpan);
+
+    const off = cell.dataset.off;
+    if (off) {
+      box.appendChild(document.createTextNode(" — non travaillé (" + off + ")"));
       return;
     }
-    const items = contributors
-      .map((c) => `<li>${c.name}${c.provisional ? " (provisoire)" : ""} — ${c.pct}%</li>`)
-      .join("");
-    box.innerHTML = `<span class="dd-date">${dateLabel}</span> — ${pct}% de charge<ul>${items}</ul>`;
+
+    let contributors = [];
+    try { contributors = JSON.parse(cell.dataset.contributors || "[]"); } catch (e) { contributors = []; }
+
+    if (!contributors.length) {
+      box.appendChild(document.createTextNode(" — journée libre"));
+      return;
+    }
+
+    box.appendChild(document.createTextNode(" — " + cell.dataset.pct + "% de charge"));
+    const list = document.createElement("ul");
+    contributors.forEach((c) => {
+      const li = document.createElement("li");
+      li.textContent = c.name + (c.provisional ? " (provisoire)" : "") + " — " + c.pct + "%";
+      list.appendChild(li);
+    });
+    box.appendChild(list);
   }
 
   document.querySelectorAll(".day-cell").forEach((cell) => {
-    const handler = () => {
-      const box = document.getElementById("day-detail");
-      if (!box) return;
-      renderDetail(box, cell.dataset.date, cell.dataset.pct, cell.dataset.contributors);
-    };
+    const handler = () => renderDetail(cell);
     cell.addEventListener("mouseenter", handler);
     cell.addEventListener("click", handler);
+  });
+})();
+
+(function weekGridNavigation() {
+  // Flèches haut/bas pour passer d'une ligne à l'autre dans la même
+  // colonne : saisir une semaine se fait au clavier, pas à la souris.
+  const inputs = Array.from(document.querySelectorAll(".wg-input"));
+  if (!inputs.length) return;
+
+  const cols = 7;
+  inputs.forEach((input, i) => {
+    input.addEventListener("keydown", (e) => {
+      let target = null;
+      if (e.key === "ArrowDown") target = inputs[i + cols];
+      else if (e.key === "ArrowUp") target = inputs[i - cols];
+      if (target) { e.preventDefault(); target.focus(); target.select(); }
+    });
+    input.addEventListener("focus", () => input.select());
+  });
+})();
+
+(function checkboxPills() {
+  document.querySelectorAll(".checkbox-pill input").forEach((input) => {
+    input.addEventListener("change", () => {
+      input.closest(".checkbox-pill").classList.toggle("is-checked", input.checked);
+    });
   });
 })();

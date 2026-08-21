@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Semaine — Timing{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">{{ start.strftime('%d %b') }} → {{ end.strftime('%d %b %Y') }}</p>
+    <h1>Semaine</h1>
+  </div>
+  <div class="btn-row">
+    <a href="{{ url_for('week', offset=offset - 1) }}" class="btn btn-ghost btn-sm">← semaine</a>
+    <a href="{{ url_for('week', offset=0) }}" class="btn btn-ghost btn-sm">Cette semaine</a>
+    <a href="{{ url_for('week', offset=offset + 1) }}" class="btn btn-ghost btn-sm">semaine →</a>
+  </div>
+</div>
+
+{% if rows %}
+<form method="post" action="{{ url_for('save_week') }}">
+<input type="hidden" name="offset" value="{{ offset }}">
+<section class="card">
+  <div class="grid-scroll">
+    <table class="week-grid">
+      <thead>
+        <tr>
+          <th class="wg-project">Projet</th>
+          {% for d in days %}
+          <th class="wg-day {{ 'is-off' if d.off_reason }} {{ 'is-today' if d.is_today }}">
+            <span class="wg-day-name">{{ d.label }}</span>
+            <span class="wg-day-num">{{ d.num }}</span>
+            {% if d.off_reason %}<span class="wg-off">{{ d.off_reason }}</span>{% endif %}
+          </th>
+          {% endfor %}
+          <th class="wg-total">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td class="wg-project">
+            <span class="pcard-color-dot" style="background:{{ row.project.color }};"></span>
+            <a href="{{ url_for('project_detail', project_id=row.project.id) }}">{{ row.project.name }}</a>
+            {% if row.task_name %}<span class="tag-pill">{{ row.task_name }}</span>{% endif %}
+          </td>
+          {% for d in days %}
+          <td class="wg-cell {{ 'is-off' if d.off_reason }} {{ 'is-today' if d.is_today }}">
+            <input type="number" step="5" min="0" max="300" inputmode="numeric"
+                   class="wg-input"
+                   name="cell-{{ row.project.id }}-{{ row.task_id or 'none' }}-{{ d.iso }}"
+                   value="{{ row.values[loop.index0]|round(0)|int if row.values[loop.index0] else '' }}"
+                   placeholder="—" aria-label="{{ row.project.name }} {{ d.num }}">
+          </td>
+          {% endfor %}
+          <td class="wg-total mono">{{ row.total|round(0)|int }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td class="wg-project">Total du jour</td>
+          {% for t in day_totals %}
+          <td class="wg-total mono {{ 'over' if t > 100 }}">{{ t|round(0)|int }}%</td>
+          {% endfor %}
+          <td class="wg-total mono">{{ week_total|round(0)|int }}%</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <div class="btn-row" style="margin-top: var(--space-4);">
+    <button type="submit" class="btn btn-primary">Enregistrer la semaine</button>
+    <span class="faint">Une case vide ou à 0 supprime la saisie correspondante.</span>
+  </div>
+</section>
+</form>
+
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Ajouter une ligne</h3></div>
+  <form method="post" action="{{ url_for('add_week_row') }}" class="quick-add">
+    <input type="hidden" name="offset" value="{{ offset }}">
+    <div class="field field-project">
+      <label for="row-project">Projet</label>
+      <select id="row-project" name="project_id" required>
+        {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field field-project">
+      <label for="row-task">Tâche</label>
+      <select id="row-task" name="task_id">
+        <option value="none">Sans tâche</option>
+        {% for pid, tasks in tasks_by_project.items() %}
+          {% for t in tasks %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-ghost">Ajouter la ligne</button>
+  </form>
+  <p class="faint" style="margin-top: var(--space-3);">
+    La grille regroupe par projet et par tâche. Pour une saisie avec une
+    note détaillée, passe par la fiche du projet.
+  </p>
+</section>
+{% else %}
+<div class="empty">
+  <h3>Aucun projet à saisir</h3>
+  <p>Crée un projet confirmé ou provisoire pour commencer à remplir ta semaine.</p>
+  <a href="{{ url_for('new_project') }}" class="btn btn-ghost" style="margin-top: var(--space-4);">Nouveau projet</a>
+</div>
+{% endif %}
+{% endblock %}

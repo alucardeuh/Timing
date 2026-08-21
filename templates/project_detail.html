@@ -2,148 +2,132 @@
 {% block title %}{{ project.name }} — Timing{% endblock %}
 
 {% block content %}
-{% set pace_label = {'ahead': 'en avance', 'on_track': 'dans les clous', 'behind': 'en retard'} %}
-{% set status_label = {'provisional': 'provisoire', 'confirmed': 'confirmé', 'paused': 'en pause', 'completed': 'terminé'} %}
-
 <div class="page-head">
   <div>
     <p class="eyebrow">{{ project.client or 'Sans client' }} · débute le {{ project.start_date }}</p>
     <h1><span class="pcard-color-dot" style="background:{{ project.color }}; display:inline-block; margin-right:8px;"></span>{{ project.name }}</h1>
   </div>
-  <div style="display:flex; gap: var(--space-2); align-items:center;">
+  <div class="btn-row">
     <span class="pill pill-{{ project.status }}">{{ status_label[project.status] }}</span>
     <a href="{{ url_for('edit_project', project_id=project.id) }}" class="btn btn-ghost btn-sm">Modifier</a>
     {% if project.status == 'provisional' %}
-    <form class="inline-form" method="post" action="{{ url_for('set_project_status', project_id=project.id) }}">
-      <input type="hidden" name="status" value="confirmed">
-      <button type="submit" class="btn btn-primary btn-sm">Confirmer le projet</button>
-    </form>
+      <form class="inline-form" method="post" action="{{ url_for('change_status', project_id=project.id) }}">
+        <input type="hidden" name="status" value="confirmed">
+        <button type="submit" class="btn btn-primary btn-sm">Confirmer le projet</button>
+      </form>
     {% elif project.status == 'confirmed' %}
-    <form class="inline-form" method="post" action="{{ url_for('set_project_status', project_id=project.id) }}">
-      <input type="hidden" name="status" value="completed">
-      <button type="submit" class="btn btn-ghost btn-sm">Marquer terminé</button>
-    </form>
-    <form class="inline-form" method="post" action="{{ url_for('set_project_status', project_id=project.id) }}">
-      <input type="hidden" name="status" value="paused">
-      <button type="submit" class="btn btn-ghost btn-sm">Mettre en pause</button>
-    </form>
-    {% elif project.status == 'paused' %}
-    <form class="inline-form" method="post" action="{{ url_for('set_project_status', project_id=project.id) }}">
-      <input type="hidden" name="status" value="confirmed">
-      <button type="submit" class="btn btn-ghost btn-sm">Réactiver</button>
-    </form>
+      <form class="inline-form" method="post" action="{{ url_for('change_status', project_id=project.id) }}">
+        <input type="hidden" name="status" value="completed">
+        <button type="submit" class="btn btn-ghost btn-sm">Marquer terminé</button>
+      </form>
+      <form class="inline-form" method="post" action="{{ url_for('change_status', project_id=project.id) }}">
+        <input type="hidden" name="status" value="paused">
+        <button type="submit" class="btn btn-ghost btn-sm">Mettre en pause</button>
+      </form>
+    {% elif project.status in ('paused', 'completed') %}
+      <form class="inline-form" method="post" action="{{ url_for('change_status', project_id=project.id) }}">
+        <input type="hidden" name="status" value="confirmed">
+        <button type="submit" class="btn btn-ghost btn-sm">Réactiver</button>
+      </form>
     {% endif %}
   </div>
 </div>
 
 <section class="card">
-  <div class="card-title-row"><h3>Cadence</h3>
-    {% if project.status in ('confirmed', 'paused', 'completed') %}
+  <div class="card-title-row">
+    <h3>Cadence</h3>
     <span class="stat-badge status-{{ stats.pace_status }}"><span class="dot"></span>{{ pace_label[stats.pace_status] }}</span>
-    {% endif %}
   </div>
 
-  <div class="status-{{ stats.pace_status }}">
-    <div class="tally">
-      {% for seg in tally.segments %}
-      <div class="tally-seg"><div class="fill" style="width: {{ (seg * 100)|round(1) }}%;"></div></div>
-      {% endfor %}
-    </div>
+  <div class="progress-track progress-lg">
+    <div class="progress-fill status-fill-{{ stats.pace_status }}" style="width: {{ [stats.pct_consumed, 100]|min }}%;"></div>
+    <div class="progress-marker" style="left: {{ [stats.pct_time_elapsed, 100]|min }}%;"></div>
   </div>
   <div class="tally-labels">
     <span>{{ project.start_date }}</span>
-    <span>1 jalon = 1 {{ 'jour' if tally.unit == 'day' else 'semaine' }}</span>
+    <span>budget consommé {{ stats.pct_consumed }}% · temps écoulé {{ stats.pct_time_elapsed }}%</span>
     <span>{{ stats.planned_end_date }}</span>
   </div>
 
   <div class="stat-strip">
     <div class="stat"><div class="stat-num">{{ stats.days_spent }} / {{ stats.total_days_sold }}</div><div class="stat-label">Jours consommés / vendus</div></div>
-    <div class="stat"><div class="stat-num">{{ stats.pct_consumed }}%</div><div class="stat-label">Budget consommé</div></div>
-    <div class="stat"><div class="stat-num">{% if stats.real_hourly_rate %}{{ '%.0f'|format(stats.real_hourly_rate) }}{{ currency }}{% else %}—{% endif %}</div><div class="stat-label">Taux réel / heure</div></div>
-    <div class="stat"><div class="stat-num">{% if stats.theoretical_hourly_rate %}{{ '%.0f'|format(stats.theoretical_hourly_rate) }}{{ currency }}{% else %}—{% endif %}</div><div class="stat-label">Taux prévu / heure</div></div>
-    <div class="stat"><div class="stat-num">{% if stats.rentability_index %}×{{ '%.2f'|format(stats.rentability_index) }}{% else %}—{% endif %}</div><div class="stat-label">Indice de rentabilité</div></div>
     <div class="stat"><div class="stat-num">{{ stats.days_remaining }}</div><div class="stat-label">Jours restants</div></div>
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.theoretical_day_rate or 0) }}{{ currency }}</div><div class="stat-label">Vendu par jour</div></div>
+    <div class="stat">
+      <div class="stat-num">{% if stats.real_day_rate %}{{ '%.0f'|format(stats.real_day_rate) }}{{ currency }}{% else %}—{% endif %}</div>
+      <div class="stat-label">Marge par jour passé</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">{% if stats.rentability_index %}×{{ '%.2f'|format(stats.rentability_index) }}{% else %}—{% endif %}</div>
+      <div class="stat-label">Indice de rentabilité</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">{% if stats.projected_index %}×{{ '%.2f'|format(stats.projected_index) }}{% else %}—{% endif %}</div>
+      <div class="stat-label">Indice projeté</div>
+    </div>
   </div>
 
-  <svg viewBox="0 0 {{ burndown.width }} {{ burndown.height }}" class="burndown" style="width:100%; height:auto; margin-top: var(--space-3);">
+  {% if not stats.index_reliable %}
+  <p class="field-help-box">
+    L'indice de rentabilité n'est pas encore affiché : ce projet a consommé
+    <strong>{{ stats.pct_consumed }}%</strong> de son budget, en dessous du
+    seuil de <strong>{{ settings.min_consumption_pct|int }}%</strong> réglé.
+    Sur trop peu de jours saisis, le rapport prix / temps passé donne un
+    chiffre spectaculaire mais faux. L'indice projeté, lui, extrapole le
+    rythme observé jusqu'à la fin.
+  </p>
+  {% endif %}
+
+  <svg viewBox="0 0 {{ burndown.width }} {{ burndown.height }}" class="burndown">
     <line class="today-line" x1="{{ burndown.today_x }}" y1="{{ burndown.pad }}" x2="{{ burndown.today_x }}" y2="{{ burndown.height - burndown.pad }}"></line>
     <polyline class="ref-line" points="{{ burndown.reference }}"></polyline>
     <polyline class="actual-line" points="{{ burndown.actual }}" style="stroke: {{ project.color }};"></polyline>
   </svg>
-</section>
-
-<section class="card section-gap">
-  <div class="card-title-row"><h3>Tâches</h3></div>
-  {% if tasks %}
-  <form method="post" action="{{ url_for('create_task', project_id=project.id) }}" style="display:flex; gap:8px; margin-bottom: var(--space-4);">
-    <input name="name" type="text" placeholder="Nouvelle tâche…" style="flex:1; padding:8px 11px; border:1px solid var(--border); border-radius:var(--radius-sm);">
-    <button type="submit" class="btn btn-ghost btn-sm">Ajouter</button>
-  </form>
-  {% if breakdown %}
-  {% for row in breakdown %}
-  <div class="task-row">
-    <div class="task-name">{{ row.name }}</div>
-    <div class="task-bar-track"><div class="task-bar-fill" style="width:{{ row.pct }}%; background:{{ project.color }};"></div></div>
-    <div class="task-pct">{{ row.hours }}h · {{ row.pct }}%</div>
+  <div class="tally-labels">
+    <span class="faint">— — référence (rythme vendu)</span>
+    <span class="faint">
+      {% if stats.projected_end_date %}Fin projetée au rythme actuel : <strong class="mono">{{ stats.projected_end_date }}</strong>{% else %}Pas encore assez d'historique pour projeter une fin{% endif %}
+    </span>
   </div>
-  {% endfor %}
-  {% else %}
-  <p class="faint">Pas encore d'heures saisies par tâche.</p>
-  {% endif %}
-  {% else %}
-  <form method="post" action="{{ url_for('create_task', project_id=project.id) }}" style="display:flex; gap:8px;">
-    <input name="name" type="text" placeholder="ex. Maquettes, Intégration, Réunions client…" style="flex:1; padding:8px 11px; border:1px solid var(--border); border-radius:var(--radius-sm);">
-    <button type="submit" class="btn btn-ghost btn-sm">Ajouter</button>
-  </form>
-  <p class="faint" style="margin-top: var(--space-2);">Optionnel — sans tâches, tes saisies restent simplement rattachées au projet.</p>
-  {% endif %}
 </section>
 
 <section class="card section-gap">
-  <div class="card-title-row"><h3>Ajouter du temps sur ce projet</h3></div>
-  <form class="quick-add" method="post" action="{{ url_for('create_entry') }}">
-    <input type="hidden" name="project_id" value="{{ project.id }}">
-    <input type="hidden" name="next" value="{{ url_for('project_detail', project_id=project.id) }}">
-    <div class="field field-pct">
-      <label>% du jour</label>
-      <input name="percent_of_day" type="number" step="5" min="0" max="300" placeholder="40" required>
-    </div>
-    {% if tasks %}
-    <div class="field field-project">
-      <label>Tâche</label>
-      <select name="task_id">
-        <option value="">Sans tâche</option>
-        {% for t in tasks %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
-      </select>
-    </div>
-    {% endif %}
-    <div class="field field-date">
-      <label>Date</label>
-      <input name="entry_date" type="date" value="{{ today }}" required>
-    </div>
-    <div class="field field-note">
-      <label>Note</label>
-      <input name="note" type="text" placeholder="Ce qui a été fait…">
-    </div>
-    <button type="submit" class="btn btn-primary">Ajouter</button>
-  </form>
-</section>
+  <div class="card-title-row"><h3>Argent</h3></div>
+  <div class="stat-strip">
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(project.price_total) }}{{ currency }}</div><div class="stat-label">Prix vendu</div></div>
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.costs) }}{{ currency }}</div><div class="stat-label">Coûts directs</div></div>
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.margin) }}{{ currency }}</div><div class="stat-label">Marge</div></div>
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.invoiced) }}{{ currency }}</div><div class="stat-label">Facturé</div></div>
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.paid) }}{{ currency }}</div><div class="stat-label">Encaissé</div></div>
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.to_invoice) }}{{ currency }}</div><div class="stat-label">Reste à facturer</div></div>
+  </div>
 
-<section class="card section-gap">
-  <div class="card-title-row"><h3>Historique ({{ entries|length }})</h3></div>
-  {% if entries %}
+  <h4 class="sub-head">Jalons de facturation</h4>
+  {% if milestones %}
   <table class="entries">
-    <thead><tr><th>Date</th><th>%</th><th>Heures</th><th>Tâche</th><th>Note</th><th></th></tr></thead>
+    <thead><tr><th>Jalon</th><th>Montant</th><th>Échéance</th><th>Statut</th><th>Réf.</th><th></th></tr></thead>
     <tbody>
-      {% for e in entries %}
+      {% for m in milestones %}
       <tr>
-        <td class="mono">{{ e.entry_date }}</td>
-        <td class="mono">{{ e.percent_of_day|round(0)|int }}%</td>
-        <td class="mono">{{ e.hours }}</td>
-        <td>{% if e.task_id and e.task_id in task_names %}<span class="tag-pill">{{ task_names[e.task_id] }}</span>{% endif %}</td>
-        <td>{{ e.note or '' }}</td>
-        <td>
-          <form method="post" action="{{ url_for('delete_entry', entry_id=e.id) }}" onsubmit="return confirm('Supprimer cette entrée ?');">
+        <td>{{ m.label }}</td>
+        <td class="mono">{{ '%.0f'|format(m.amount) }}{{ currency }}</td>
+        <td class="mono">{{ m.due_date or '—' }}</td>
+        <td><span class="pill pill-ms-{{ m.status }}">{{ milestone_label[m.status] }}</span></td>
+        <td class="mono">{{ m.invoice_ref or '—' }}</td>
+        <td class="row-actions">
+          {% if m.status == 'todo' %}
+          <form method="post" action="{{ url_for('milestone_status', milestone_id=m.id) }}" class="inline-form">
+            <input type="hidden" name="status" value="invoiced">
+            <input type="text" name="invoice_ref" placeholder="n° facture" class="mini-input">
+            <button type="submit" class="btn btn-ghost btn-sm">Facturé</button>
+          </form>
+          {% elif m.status == 'invoiced' %}
+          <form method="post" action="{{ url_for('milestone_status', milestone_id=m.id) }}" class="inline-form">
+            <input type="hidden" name="status" value="paid">
+            <button type="submit" class="btn btn-ghost btn-sm">Encaissé</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('delete_milestone', milestone_id=m.id) }}" class="inline-form" onsubmit="return confirm('Supprimer ce jalon ?');">
             <button type="submit" class="btn btn-ghost btn-sm">Suppr.</button>
           </form>
         </td>
@@ -152,20 +136,183 @@
     </tbody>
   </table>
   {% else %}
+  <p class="faint">Aucun jalon. Sans jalon, le projet n'apparaît pas dans la page Facturation.</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('create_milestone', project_id=project.id) }}" class="quick-add" style="margin-top: var(--space-4);">
+    <div class="field field-note"><label>Libellé</label><input name="label" type="text" placeholder="Acompte 30%" required></div>
+    <div class="field field-pct"><label>Montant</label><input name="amount" type="number" step="10" min="0" required></div>
+    <div class="field field-date"><label>Échéance</label><input name="due_date" type="date"></div>
+    <button type="submit" class="btn btn-ghost">Ajouter le jalon</button>
+  </form>
+
+  <h4 class="sub-head">Coûts directs</h4>
+  {% if costs %}
+  <table class="entries">
+    <thead><tr><th>Libellé</th><th>Montant</th><th>Date</th><th></th></tr></thead>
+    <tbody>
+      {% for c in costs %}
+      <tr>
+        <td>{{ c.label }}</td>
+        <td class="mono">{{ '%.0f'|format(c.amount) }}{{ currency }}</td>
+        <td class="mono">{{ c.cost_date or '—' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('delete_cost', cost_id=c.id) }}" class="inline-form" onsubmit="return confirm('Supprimer ce coût ?');">
+            <button type="submit" class="btn btn-ghost btn-sm">Suppr.</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="faint">Aucun coût. Sous-traitance, licences, déplacements : ils sont déduits de la marge par jour.</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('create_cost', project_id=project.id) }}" class="quick-add" style="margin-top: var(--space-4);">
+    <div class="field field-note"><label>Libellé</label><input name="label" type="text" placeholder="Sous-traitance intégration" required></div>
+    <div class="field field-pct"><label>Montant</label><input name="amount" type="number" step="10" min="0" required></div>
+    <div class="field field-date"><label>Date</label><input name="cost_date" type="date"></div>
+    <button type="submit" class="btn btn-ghost">Ajouter le coût</button>
+  </form>
+</section>
+
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Tâches</h3></div>
+  {% if breakdown %}
+  {% for row in breakdown %}
+  <div class="task-row">
+    <div class="task-name">{{ row.name }}</div>
+    <div class="task-bar-track"><div class="task-bar-fill" style="width:{{ (row.days / (breakdown[0].days or 1) * 100)|round(1) }}%; background:{{ project.color }};"></div></div>
+    <div class="task-pct">{{ row.days|round(2) }} j</div>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="faint">Pas encore de temps saisi par tâche.</p>
+  {% endif %}
+
+  {% if tasks %}
+  <table class="entries" style="margin-top: var(--space-4);">
+    <tbody>
+      {% for t in tasks %}
+      <tr>
+        <td>
+          <form method="post" action="{{ url_for('rename_task', task_id=t.id) }}" class="inline-form">
+            <input name="name" value="{{ t.name }}" class="mini-input" style="width: 220px;">
+            <button type="submit" class="btn btn-ghost btn-sm">Renommer</button>
+          </form>
+          {% if t.archived %}<span class="tag-pill">archivée</span>{% endif %}
+        </td>
+        <td class="row-actions">
+          <form method="post" action="{{ url_for('toggle_task_archive', task_id=t.id) }}" class="inline-form">
+            <input type="hidden" name="archived" value="{{ 0 if t.archived else 1 }}">
+            <button type="submit" class="btn btn-ghost btn-sm">{{ 'Réactiver' if t.archived else 'Archiver' }}</button>
+          </form>
+          <form method="post" action="{{ url_for('delete_task', task_id=t.id) }}" class="inline-form" onsubmit="return confirm('Supprimer cette tâche ? Le temps saisi est conservé sans étiquette.');">
+            <button type="submit" class="btn btn-ghost btn-sm">Suppr.</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('create_task', project_id=project.id) }}" class="quick-add" style="margin-top: var(--space-4);">
+    <div class="field field-note"><label>Nouvelle tâche</label><input name="name" type="text" placeholder="Maquettes, Intégration, Réunions client…" required></div>
+    <button type="submit" class="btn btn-ghost">Ajouter</button>
+  </form>
+</section>
+
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Ajouter du temps</h3></div>
+  <form class="quick-add" method="post" action="{{ url_for('create_entry') }}">
+    <input type="hidden" name="project_id" value="{{ project.id }}">
+    <input type="hidden" name="next" value="{{ url_for('project_detail', project_id=project.id) }}">
+    <div class="field field-pct"><label>% du jour</label><input name="percent_of_day" type="number" step="5" min="0" max="300" placeholder="40" required></div>
+    {% if active_tasks %}
+    <div class="field field-project">
+      <label>Tâche</label>
+      <select name="task_id">
+        <option value="">Sans tâche</option>
+        {% for t in active_tasks %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    <div class="field field-date"><label>Date</label><input name="entry_date" type="date" value="{{ today }}" required></div>
+    <div class="field field-note"><label>Note</label><input name="note" type="text" placeholder="Ce qui a été fait…"></div>
+    <button type="submit" class="btn btn-primary">Ajouter</button>
+  </form>
+</section>
+
+<section class="card section-gap">
+  <div class="card-title-row">
+    <h3>Historique ({{ total_entries }})</h3>
+    <a href="{{ url_for('export', kind='entries') }}" class="faint">exporter en CSV →</a>
+  </div>
+  {% if entries %}
+  <table class="entries">
+    <thead><tr><th>Date</th><th>%</th><th>Jours</th><th>Tâche</th><th>Note</th><th></th></tr></thead>
+    <tbody>
+      {% for e in entries %}
+      <tr>
+        <td class="mono">{{ e.entry_date }}</td>
+        <td class="mono">{{ e.percent_of_day|round(0)|int }}%</td>
+        <td class="mono">{{ (e.percent_of_day / 100)|round(2) }}</td>
+        <td>{% if e.task_id and e.task_id in task_names %}<span class="tag-pill">{{ task_names[e.task_id] }}</span>{% endif %}</td>
+        <td>{{ e.note or '' }}</td>
+        <td class="row-actions">
+          <a href="{{ url_for('edit_entry', entry_id=e.id) }}" class="btn btn-ghost btn-sm">Modifier</a>
+          <form method="post" action="{{ url_for('delete_entry', entry_id=e.id) }}" class="inline-form" onsubmit="return confirm('Supprimer cette entrée ?');">
+            <button type="submit" class="btn btn-ghost btn-sm">Suppr.</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if total_pages > 1 %}
+  <div class="pager">
+    {% if page > 1 %}<a href="{{ url_for('project_detail', project_id=project.id, page=page-1) }}" class="btn btn-ghost btn-sm">← précédent</a>{% endif %}
+    <span class="faint">page {{ page }} / {{ total_pages }}</span>
+    {% if page < total_pages %}<a href="{{ url_for('project_detail', project_id=project.id, page=page+1) }}" class="btn btn-ghost btn-sm">suivant →</a>{% endif %}
+  </div>
+  {% endif %}
+  {% else %}
   <p class="muted">Aucune entrée pour l'instant.</p>
   {% endif %}
 </section>
 
+{% if scope_changes %}
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Historique de périmètre</h3></div>
+  <table class="entries">
+    <thead><tr><th>Date</th><th>Champ</th><th>Avant</th><th>Après</th><th>Motif</th></tr></thead>
+    <tbody>
+      {% for s in scope_changes %}
+      <tr>
+        <td class="mono">{{ s.changed_at[:10] }}</td>
+        <td>{{ s.field }}</td>
+        <td class="mono">{{ s.old_value }}</td>
+        <td class="mono">{{ s.new_value }}</td>
+        <td>{{ s.note or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
 {% if project.notes %}
 <section class="card section-gap">
   <h3>Notes</h3>
-  <p style="white-space: pre-wrap; margin-top: var(--space-2);">{{ project.notes }}</p>
+  <p class="notes-body">{{ project.notes }}</p>
 </section>
 {% endif %}
 
 <div class="section-gap">
-  <form method="post" action="{{ url_for('delete_project', project_id=project.id) }}" onsubmit="return confirm('Supprimer définitivement ce projet et toutes ses données ?');">
-    <button type="submit" class="btn btn-danger btn-sm">Supprimer ce projet</button>
+  <form method="post" action="{{ url_for('archive_project', project_id=project.id) }}" onsubmit="return confirm('Mettre ce projet à la corbeille ? Il restera récupérable.');">
+    <button type="submit" class="btn btn-danger btn-sm">Mettre à la corbeille</button>
   </form>
 </div>
 {% endblock %}

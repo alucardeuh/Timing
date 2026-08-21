@@ -308,3 +308,153 @@ table.entries tr:hover td { background: var(--panel-2); }
 
 .section-gap { margin-top: var(--space-6); }
 .inline-form { display: inline; }
+
+/* =====================================================================
+   V2 — composants ajoutés
+   ===================================================================== */
+
+/* Alertes ------------------------------------------------------------ */
+.alert-list { list-style: none; margin: 0; padding: 0; }
+.alert { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) 0;
+         border-bottom: 1px solid var(--border-soft); font-size: 13.5px; }
+.alert:last-child { border-bottom: none; }
+.alert a { text-decoration: none; }
+.alert a:hover { text-decoration: underline; }
+.alert-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.alert-danger .alert-dot { background: var(--load-storm); }
+.alert-warning .alert-dot { background: var(--load-heavy); }
+.alert-info .alert-dot { background: var(--text-faint); }
+
+/* Barre d'avancement : consommation + repère de temps écoulé ---------- */
+.progress-track { position: relative; height: 12px; background: var(--panel-2);
+                  border: 1px solid var(--border-soft); border-radius: 6px;
+                  overflow: hidden; margin: var(--space-3) 0 var(--space-2); }
+.progress-lg { height: 18px; border-radius: 9px; }
+.progress-fill { height: 100%; border-radius: 6px 0 0 6px; transition: width .2s ease; }
+.status-fill-ahead { background: var(--load-light); }
+.status-fill-on_track { background: var(--load-heavy); }
+.status-fill-behind { background: var(--load-storm); }
+.status-fill-not_started { background: var(--border); }
+.progress-marker { position: absolute; top: -2px; bottom: -2px; width: 2px;
+                   background: var(--text); opacity: .55; }
+.status-not_started .stat-badge, .stat-badge.status-not_started { background: var(--panel-2); color: var(--text-muted); }
+
+/* Objectifs de CA ---------------------------------------------------- */
+.goal-track { height: 5px; background: var(--panel-2); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+.goal-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+
+/* Grille hebdo ------------------------------------------------------- */
+.grid-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.week-grid { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 620px; }
+.week-grid th, .week-grid td { padding: var(--space-2); border-bottom: 1px solid var(--border-soft); }
+.week-grid thead th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+                      color: var(--text-faint); text-align: center; vertical-align: bottom; }
+.week-grid .wg-project { text-align: left; min-width: 190px; display: table-cell; }
+.week-grid td.wg-project { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; border-bottom: none; }
+.wg-day-name { display: block; font-weight: 600; color: var(--text-muted); }
+.wg-day-num { display: block; font-family: var(--font-mono); font-size: 10.5px; }
+.wg-off { display: block; font-size: 9.5px; color: var(--text-faint); text-transform: none; letter-spacing: 0; }
+.week-grid th.is-off, .week-grid td.is-off { background: var(--panel-2); }
+.week-grid th.is-today, .week-grid td.is-today { box-shadow: inset 0 2px 0 var(--accent); }
+.wg-input { width: 100%; min-width: 52px; text-align: center; font-family: var(--font-mono);
+            font-size: 13.5px; padding: 7px 4px; border: 1px solid var(--border);
+            border-radius: var(--radius-sm); background: #fff; color: var(--text); }
+.wg-input:focus { border-color: var(--accent); outline: none; }
+.wg-total { text-align: right; font-weight: 500; }
+.week-grid tfoot td { border-top: 1px solid var(--border); border-bottom: none;
+                      font-weight: 600; padding-top: var(--space-3); }
+.wg-total.over { color: var(--load-storm); }
+
+/* Gantt (sorti des styles inline) ------------------------------------ */
+.gantt { display: flex; gap: var(--space-3); }
+.gantt-labels { width: 170px; flex-shrink: 0; }
+.gantt-canvas { flex: 1; min-width: 0; }
+.gantt-scale { position: relative; height: 18px; }
+.gantt-scale-spacer { height: 18px; }
+.gantt-scale-tick { position: absolute; font-size: 10.5px; color: var(--text-faint); }
+.gantt-label { height: 34px; display: flex; align-items: center; gap: 6px; font-size: 12.5px;
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gantt-label a { overflow: hidden; text-overflow: ellipsis; }
+.gantt-label-total { font-weight: 600; border-top: 1px solid var(--border-soft);
+                     margin-top: var(--space-1); padding-top: var(--space-1); }
+.gantt-row { display: grid; height: 34px; align-items: center; }
+.gantt-capacity { border-top: 1px solid var(--border-soft); margin-top: var(--space-1);
+                  padding-top: var(--space-1); gap: 1px; }
+.gantt-capacity .day-cell { height: 22px; border-radius: 2px; }
+.gantt-bar.clip-start { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.gantt-bar.clip-end { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+
+/* Carte de charge : jour non travaillé -------------------------------- */
+.day-cell.level-off { background: repeating-linear-gradient(45deg,
+    var(--panel-2) 0 4px, #fff 4px 8px); border-color: var(--border-soft); cursor: default; }
+.day-cell.level-off:hover { transform: none; }
+.swatch-off { background: repeating-linear-gradient(45deg, var(--panel-2) 0 3px, #fff 3px 6px);
+              border: 1px solid var(--border); }
+.swatch-hatched { background-color: var(--panel-2); border: 1px solid var(--border);
+                  background-image: repeating-linear-gradient(45deg, rgba(0,0,0,.2) 0 3px, transparent 3px 7px); }
+.capacity-summary { font-size: 13px; color: var(--text-muted); margin: 0 0 var(--space-2); }
+
+/* Graphiques à barres ------------------------------------------------- */
+.barchart { width: 100%; height: auto; margin-top: var(--space-2); }
+.barchart rect { fill: var(--accent); opacity: .85; }
+.barchart .bar-label { font-family: var(--font-mono); font-size: 9px; fill: var(--text-faint); }
+.burndown { width: 100%; height: auto; margin-top: var(--space-3); }
+
+/* Filtres, tabs, tableaux -------------------------------------------- */
+.filter-bar { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; }
+.filter-bar input[type="search"], .filter-bar select {
+  padding: 8px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-family: var(--font-body); font-size: 13.5px; background: #fff; color: var(--text); }
+.filter-bar input[type="search"] { flex: 1; min-width: 200px; }
+.tab-count { font-family: var(--font-mono); font-size: 10.5px; opacity: .7; margin-left: 4px; }
+.cell-link { display: inline-flex; align-items: center; gap: 8px; }
+.cell-strong { font-family: var(--font-display); font-weight: 600; }
+.row-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mini-input { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+              font-size: 12.5px; width: 110px; font-family: var(--font-body); }
+.overdue { color: var(--load-storm); font-weight: 600; }
+.pill-ms-todo { background: var(--load-heavy-bg); color: #7A5217; }
+.pill-ms-invoiced { background: #E8EEF7; color: #2C4C7C; }
+.pill-ms-paid { background: var(--accent-light); color: var(--accent-text); }
+.sub-head { font-family: var(--font-display); font-size: 13.5px; margin: var(--space-5) 0 var(--space-2);
+            color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+.plain-list { list-style: none; margin: 0; padding: 0; font-size: 13.5px; }
+.plain-list li { padding: var(--space-2) 0; border-bottom: 1px solid var(--border-soft); }
+.plain-list li:last-child { border-bottom: none; }
+.pager { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-4); }
+.btn-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.notes-body { white-space: pre-wrap; margin-top: var(--space-2); }
+.inline-link { color: var(--accent-text); text-decoration: underline; }
+.danger-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;
+              padding: var(--space-2) 0; border-bottom: 1px solid var(--border-soft); }
+.danger-row input { flex: 1; min-width: 200px; padding: 7px 10px; border: 1px solid var(--border);
+                    border-radius: var(--radius-sm); font-size: 13px; }
+
+/* Cases à cocher en pilules (jours travaillés) ------------------------ */
+.checkbox-row { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.checkbox-pill { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px;
+                 border: 1px solid var(--border); border-radius: 100px; font-size: 13px;
+                 cursor: pointer; user-select: none; text-transform: none; letter-spacing: 0;
+                 color: var(--text-muted); margin: 0; }
+.checkbox-pill.is-checked { background: var(--accent-light); border-color: var(--accent);
+                            color: var(--accent-text); font-weight: 500; }
+.checkbox-pill input { width: auto; margin: 0; }
+
+/* Responsive --------------------------------------------------------- */
+@media (max-width: 900px) {
+  .gantt-labels { width: 120px; }
+  .quick-add { flex-direction: column; align-items: stretch; }
+  .quick-add .field, .quick-add .field-pct, .quick-add .field-date { width: 100%; }
+  .stat-strip { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .page-head { align-items: flex-start; }
+  table.entries { font-size: 12.5px; }
+}
+
+@media (max-width: 620px) {
+  .project-grid { grid-template-columns: 1fr; }
+  .rail-nav a { font-size: 12.5px; padding: var(--space-2); }
+  .rail-nav a svg { display: none; }
+  h1 { font-size: 23px; }
+  .main { padding: var(--space-4); }
+  .week-grid td.wg-project { display: table-cell; }
+}

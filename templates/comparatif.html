@@ -4,59 +4,96 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <p class="eyebrow">Rentabilité</p>
+    <p class="eyebrow">Tous projets confondus</p>
     <h1>Comparatif</h1>
   </div>
+  <a href="{{ url_for('export', kind='projects') }}" class="btn btn-ghost btn-sm">Exporter en CSV</a>
 </div>
 
 <div class="tabs">
-  <a href="{{ url_for('comparatif', tab='rentabilite') }}" class="{{ 'is-active' if tab == 'rentabilite' }}">Par projet</a>
-  <a href="{{ url_for('comparatif', tab='taches') }}" class="{{ 'is-active' if tab == 'taches' }}">Par tâche</a>
+  <a href="{{ url_for('comparatif', tab='rentabilite') }}" class="{{ 'is-active' if tab == 'rentabilite' }}">Rentabilité</a>
+  <a href="{{ url_for('comparatif', tab='tache') }}" class="{{ 'is-active' if tab == 'tache' }}">Par tâche</a>
+  <a href="{{ url_for('comparatif', tab='temps') }}" class="{{ 'is-active' if tab == 'temps' }}">Dans le temps</a>
 </div>
 
 {% if tab == 'rentabilite' %}
-<p class="muted" style="max-width: 60ch; margin-top: -8px; margin-bottom: var(--space-5);">
-  L'indice compare ton taux horaire réel à celui prévu à la vente. Au-dessus de ×1, le projet rapporte plus que prévu par heure.
-</p>
-{% if rows %}
 <section class="card">
+  <div class="grid-scroll">
   <table class="entries">
-    <thead><tr><th>Projet</th><th>Statut</th><th>Taux réel</th><th>Taux prévu</th><th>Indice</th><th>Consommé</th></tr></thead>
+    <thead><tr><th>Projet</th><th>Statut</th><th>Consommé</th><th>Vendu / jour</th><th>Marge / jour</th><th>Indice</th><th>Projeté</th></tr></thead>
     <tbody>
       {% for row in rows %}
-      {% set stats = row.stats %}
-      <tr onclick="window.location='{{ url_for('project_detail', project_id=row.project.id) }}'" style="cursor:pointer;">
-        <td><span style="font-family: var(--font-display); font-weight:600;">{{ row.project.name }}</span></td>
-        <td class="muted" style="font-size:12.5px;">{{ row.project.status }}</td>
-        <td class="mono">{% if stats.real_hourly_rate %}{{ '%.0f'|format(stats.real_hourly_rate) }}{{ currency }}/h{% else %}—{% endif %}</td>
-        <td class="mono">{% if stats.theoretical_hourly_rate %}{{ '%.0f'|format(stats.theoretical_hourly_rate) }}{{ currency }}/h{% else %}—{% endif %}</td>
-        <td class="mono">{% if stats.rentability_index %}<span class="{{ 'rank-index positive' if stats.rentability_index >= 1 else 'rank-index negative' }}">×{{ '%.2f'|format(stats.rentability_index) }}</span>{% else %}—{% endif %}</td>
-        <td class="mono">{{ stats.pct_consumed }}%</td>
+      {% set s = row.stats %}
+      <tr>
+        <td><a href="{{ url_for('project_detail', project_id=row.project.id) }}" class="cell-link"><span class="pcard-color-dot" style="background:{{ row.project.color }};"></span><span class="cell-strong">{{ row.project.name }}</span></a></td>
+        <td><span class="pill pill-{{ row.project.status }}">{{ status_label[row.project.status] }}</span></td>
+        <td class="mono">{{ s.pct_consumed }}%</td>
+        <td class="mono">{% if s.theoretical_day_rate %}{{ '%.0f'|format(s.theoretical_day_rate) }}{{ currency }}{% else %}—{% endif %}</td>
+        <td class="mono">{% if s.real_day_rate %}{{ '%.0f'|format(s.real_day_rate) }}{{ currency }}{% else %}—{% endif %}</td>
+        <td class="mono">
+          {% if s.rentability_index %}
+            <span class="rank-index {{ 'positive' if s.rentability_index >= 1 else 'negative' }}">×{{ '%.2f'|format(s.rentability_index) }}</span>
+          {% else %}<span class="faint">pas assez avancé</span>{% endif %}
+        </td>
+        <td class="mono">{% if s.projected_index %}×{{ '%.2f'|format(s.projected_index) }}{% else %}—{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
+  <p class="faint" style="margin-top: var(--space-3);">
+    L'indice compare la marge par jour réellement passé au prix vendu par
+    jour. Au-dessus de ×1, le projet rapporte plus que prévu. La colonne
+    « projeté » extrapole le rythme actuel jusqu'à la fin, et reste lisible
+    même sur un projet à peine commencé.
+  </p>
 </section>
-{% else %}
-<div class="empty"><h3>Rien à comparer pour l'instant</h3><p>Ajoute des heures sur tes projets pour voir apparaître leur rentabilité ici.</p></div>
-{% endif %}
 
-{% else %}
-<p class="muted" style="max-width: 60ch; margin-top: -8px; margin-bottom: var(--space-5);">
-  Temps total passé par type de tâche, tous projets confondus — utile pour voir où part le temps globalement (ex. combien en réunions client vs en production).
-</p>
-{% if task_rows %}
+{% elif tab == 'tache' %}
 <section class="card">
+  <div class="card-title-row"><h3>Où part ton temps</h3></div>
+  {% if task_rows %}
   {% for row in task_rows %}
   <div class="task-row">
     <div class="task-name">{{ row.name }}</div>
     <div class="task-bar-track"><div class="task-bar-fill" style="width:{{ row.pct }}%;"></div></div>
-    <div class="task-pct">{{ row.hours }}h · {{ row.pct }}%</div>
+    <div class="task-pct">{{ row.days }} j · {{ row.pct }}%</div>
   </div>
   {% endfor %}
+  {% else %}
+  <p class="faint">Aucune saisie pour l'instant.</p>
+  {% endif %}
 </section>
+
 {% else %}
-<div class="empty"><h3>Pas encore de tâches</h3><p>Ajoute des tâches à tes projets pour voir cette répartition.</p></div>
-{% endif %}
+<section class="card">
+  <div class="card-title-row"><h3>Jours travaillés par mois</h3></div>
+  {% if activity %}
+  <svg viewBox="0 0 {{ activity_chart.width }} {{ activity_chart.height }}" class="barchart">
+    {% for b in activity_chart.bars %}
+    <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="3"></rect>
+    <text x="{{ b.label_x }}" y="{{ activity_chart.height - 10 }}" text-anchor="middle" class="bar-label">{{ b.label }}</text>
+    {% endfor %}
+  </svg>
+  <p class="faint">Maximum sur la période : {{ activity_chart.max }} jours.</p>
+  {% else %}
+  <p class="faint">Aucune saisie pour l'instant.</p>
+  {% endif %}
+</section>
+
+<section class="card section-gap">
+  <div class="card-title-row"><h3>CA facturé par mois</h3></div>
+  {% if invoiced %}
+  <svg viewBox="0 0 {{ invoiced_chart.width }} {{ invoiced_chart.height }}" class="barchart">
+    {% for b in invoiced_chart.bars %}
+    <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="3"></rect>
+    <text x="{{ b.label_x }}" y="{{ invoiced_chart.height - 10 }}" text-anchor="middle" class="bar-label">{{ b.label }}</text>
+    {% endfor %}
+  </svg>
+  <p class="faint">Maximum sur la période : {{ '%.0f'|format(invoiced_chart.max) }}{{ currency }}.</p>
+  {% else %}
+  <p class="faint">Aucun jalon facturé pour l'instant.</p>
+  {% endif %}
+</section>
 {% endif %}
 {% endblock %}

@@ -7,12 +7,29 @@
     <p class="eyebrow">{{ today }}</p>
     <h1>Aujourd'hui</h1>
   </div>
+  <a href="{{ url_for('week') }}" class="btn btn-ghost">Saisir la semaine →</a>
 </div>
 
+{% if alerts %}
 <section class="card">
-  <div class="card-title-row">
-    <h3>Saisir du temps</h3>
-  </div>
+  <div class="card-title-row"><h3>À regarder</h3></div>
+  <ul class="alert-list">
+    {% for a in alerts[:6] %}
+    <li class="alert alert-{{ a.level }}">
+      <span class="alert-dot"></span>
+      {% if a.url_arg %}
+        <a href="{{ url_for(a.url_name, project_id=a.url_arg) }}">{{ a.text }}</a>
+      {% else %}
+        <a href="{{ url_for(a.url_name) }}">{{ a.text }}</a>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="card {{ 'section-gap' if alerts }}">
+  <div class="card-title-row"><h3>Saisir du temps</h3></div>
   {% if loggable %}
   <form class="quick-add" method="post" action="{{ url_for('create_entry') }}">
     <input type="hidden" name="next" value="{{ url_for('dashboard') }}">
@@ -63,13 +80,20 @@
     </a>
   </div>
 
-  <div class="capacity-strip" id="capacity-strip">
+  <p class="capacity-summary">
+    Charge moyenne <strong class="mono">{{ capacity_summary.avg_load }}%</strong>
+    sur {{ capacity_summary.working_days }} jours ouvrés ·
+    {{ capacity_summary.free_days }} libre(s) ·
+    {{ capacity_summary.storm_days }} en surcharge.
+  </p>
+
+  <div class="capacity-strip">
     {% for day in capacity %}
-    <div class="day-cell level-{{ day.level }} {{ 'has-provisional' if day.has_provisional }} {{ 'is-today' if day.date.isoformat() == today }} {{ 'is-weekend' if day.date.weekday() >= 5 }}"
+    <div class="day-cell level-{{ day.level }} {{ 'has-provisional' if day.has_provisional }} {{ 'is-today' if day.date.isoformat() == today }}"
          data-date="{{ day.date.strftime('%a %d %b') }}"
          data-pct="{{ day.pct_total }}"
-         data-contributors='{{ day.contributors|tojson }}'>
-    </div>
+         data-off="{{ day.off_reason or '' }}"
+         data-contributors='{{ day.contributors|tojson }}'></div>
     {% endfor %}
   </div>
   <div class="day-detail" id="day-detail">Survole ou clique un jour pour voir le détail.</div>
@@ -78,14 +102,50 @@
     <span><span class="swatch" style="background: var(--load-light-bg); border:1px solid var(--load-light);"></span>léger</span>
     <span><span class="swatch" style="background: var(--load-heavy-bg); border:1px solid var(--load-heavy);"></span>chargé</span>
     <span><span class="swatch" style="background: var(--load-storm-bg); border:1px solid var(--load-storm);"></span>tempête</span>
-    <span><span class="swatch" style="background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.2) 0 3px, transparent 3px 7px); background-color: var(--panel-2); border:1px solid var(--border);"></span>inclut du provisoire</span>
+    <span><span class="swatch swatch-off"></span>non travaillé</span>
+    <span><span class="swatch swatch-hatched"></span>inclut du provisoire</span>
+  </div>
+</section>
+
+<section class="card section-gap">
+  <div class="card-title-row">
+    <h3>Chiffre d'affaires</h3>
+    <a href="{{ url_for('billing') }}" class="faint">facturation →</a>
+  </div>
+  <div class="stat-strip">
+    <div class="stat">
+      <div class="stat-num">{{ '{:,.0f}'.format(revenue.invoiced_month)|replace(',', ' ') }}{{ currency }}</div>
+      <div class="stat-label">Facturé ce mois</div>
+      {% if revenue.monthly_pct is not none %}
+      <div class="goal-track"><div class="goal-fill" style="width: {{ [revenue.monthly_pct, 100]|min }}%;"></div></div>
+      <div class="faint">{{ revenue.monthly_pct }}% de l'objectif</div>
+      {% endif %}
+    </div>
+    <div class="stat">
+      <div class="stat-num">{{ '{:,.0f}'.format(revenue.invoiced_year)|replace(',', ' ') }}{{ currency }}</div>
+      <div class="stat-label">Facturé cette année</div>
+      {% if revenue.annual_pct is not none %}
+      <div class="goal-track"><div class="goal-fill" style="width: {{ [revenue.annual_pct, 100]|min }}%;"></div></div>
+      <div class="faint">{{ revenue.annual_pct }}% de l'objectif</div>
+      {% endif %}
+    </div>
+    <div class="stat">
+      <div class="stat-num">{{ '{:,.0f}'.format(revenue.backlog)|replace(',', ' ') }}{{ currency }}</div>
+      <div class="stat-label">Carnet de commandes</div>
+      <div class="faint">reste à facturer, projets confirmés</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">{{ '{:,.0f}'.format(revenue.provisional_pipeline)|replace(',', ' ') }}{{ currency }}</div>
+      <div class="stat-label">Pipeline provisoire</div>
+      <div class="faint">non signé, à confirmer</div>
+    </div>
   </div>
 </section>
 
 {% if ranked %}
 <section class="card section-gap">
   <div class="card-title-row">
-    <h3>Les plus rentables en ce moment</h3>
+    <h3>Les plus rentables</h3>
     <a href="{{ url_for('comparatif') }}" class="faint">tout le comparatif →</a>
   </div>
   <ul class="rank-list">
@@ -97,6 +157,11 @@
     </li>
     {% endfor %}
   </ul>
+  <p class="faint" style="margin-top: var(--space-3);">
+    Seuls les projets assez avancés apparaissent ici : en dessous de
+    {{ settings.min_consumption_pct|int }} % de budget consommé, l'indice
+    n'est pas encore significatif.
+  </p>
 </section>
 {% endif %}
 
@@ -108,7 +173,6 @@
 <div class="project-grid">
   {% for c in cards %}
   {% set stats = c.stats %}
-  {% set tally = c.tally %}
   <a class="card pcard" href="{{ url_for('project_detail', project_id=c.project.id) }}">
     <div class="pcard-head">
       <div>
@@ -118,19 +182,13 @@
       {% if c.project.status == 'provisional' %}
         <span class="pill pill-provisional">provisoire</span>
       {% else %}
-        <span class="stat-badge status-{{ stats.pace_status }}">
-          <span class="dot"></span>
-          {% if stats.pace_status == 'ahead' %}en avance{% elif stats.pace_status == 'on_track' %}dans les clous{% else %}en retard{% endif %}
-        </span>
+        <span class="stat-badge status-{{ stats.pace_status }}"><span class="dot"></span>{{ pace_label[stats.pace_status] }}</span>
       {% endif %}
     </div>
 
-    <div class="status-{{ stats.pace_status }}">
-      <div class="tally">
-        {% for seg in tally.segments %}
-        <div class="tally-seg"><div class="fill" style="width: {{ (seg * 100)|round(1) }}%;"></div></div>
-        {% endfor %}
-      </div>
+    <div class="progress-track" title="{{ stats.pct_consumed }} % du budget consommé, {{ stats.pct_time_elapsed }} % du temps écoulé">
+      <div class="progress-fill status-fill-{{ stats.pace_status }}" style="width: {{ [stats.pct_consumed, 100]|min }}%;"></div>
+      <div class="progress-marker" style="left: {{ [stats.pct_time_elapsed, 100]|min }}%;"></div>
     </div>
     <div class="tally-labels">
       <span>{{ stats.days_spent }} / {{ stats.total_days_sold }} j vendus</span>
@@ -139,12 +197,12 @@
 
     <div class="pcard-metrics">
       <div>
-        <div class="metric-label">Taux réel / h</div>
-        <div class="metric-value">{% if stats.real_hourly_rate %}{{ '%.0f'|format(stats.real_hourly_rate) }}{{ currency }}{% else %}—{% endif %}</div>
+        <div class="metric-label">Marge / jour</div>
+        <div class="metric-value">{% if stats.real_day_rate %}{{ '%.0f'|format(stats.real_day_rate) }}{{ currency }}{% else %}—{% endif %}</div>
       </div>
       <div>
-        <div class="metric-label">Prévu / h</div>
-        <div class="metric-value">{% if stats.theoretical_hourly_rate %}{{ '%.0f'|format(stats.theoretical_hourly_rate) }}{{ currency }}{% else %}—{% endif %}</div>
+        <div class="metric-label">Vendu / jour</div>
+        <div class="metric-value">{% if stats.theoretical_day_rate %}{{ '%.0f'|format(stats.theoretical_day_rate) }}{{ currency }}{% else %}—{% endif %}</div>
       </div>
       <div>
         <div class="metric-label">Jours restants</div>

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Clients — Timing{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Concentration &amp; rentabilité</p>
+    <h1>Clients</h1>
+  </div>
+</div>
+
+{% if clients %}
+{% if clients[0].share >= 50 %}
+<section class="card">
+  <ul class="alert-list">
+    <li class="alert alert-warning"><span class="alert-dot"></span>
+      {{ clients[0].client }} représente {{ clients[0].share }}% de ton chiffre d'affaires.
+      Au-delà de 50%, la perte de ce seul client remet en cause l'activité.
+    </li>
+  </ul>
+</section>
+{% endif %}
+
+<section class="card {{ 'section-gap' if clients[0].share >= 50 }}">
+  <div class="card-title-row"><h3>Répartition du CA</h3></div>
+  {% for c in clients %}
+  <div class="task-row">
+    <div class="task-name">{{ c.client }}</div>
+    <div class="task-bar-track"><div class="task-bar-fill" style="width:{{ c.share }}%;"></div></div>
+    <div class="task-pct">{{ c.share }}%</div>
+  </div>
+  {% endfor %}
+</section>
+
+<section class="card section-gap">
+  <div class="grid-scroll">
+  <table class="entries">
+    <thead><tr><th>Client</th><th>Projets</th><th>CA vendu</th><th>Facturé</th><th>Jours vendus</th><th>Jours passés</th><th>Vendu / jour</th><th>Marge / jour</th></tr></thead>
+    <tbody>
+      {% for c in clients %}
+      <tr>
+        <td class="cell-strong">{{ c.client }}</td>
+        <td class="mono">{{ c.projects }}</td>
+        <td class="mono">{{ '%.0f'|format(c.revenue) }}{{ currency }}</td>
+        <td class="mono">{{ '%.0f'|format(c.invoiced) }}{{ currency }}</td>
+        <td class="mono">{{ c.days_sold }}</td>
+        <td class="mono">{{ c.days_spent }}</td>
+        <td class="mono">{% if c.sold_day_rate %}{{ '%.0f'|format(c.sold_day_rate) }}{{ currency }}{% else %}—{% endif %}</td>
+        <td class="mono">{% if c.real_day_rate %}{{ '%.0f'|format(c.real_day_rate) }}{{ currency }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="faint" style="margin-top: var(--space-3);">
+    « Marge / jour » = (CA vendu − coûts directs) ÷ jours réellement passés.
+    S'il est bien en dessous du « vendu / jour », ce client te coûte plus de
+    temps que tu ne lui en as vendu.
+  </p>
+</section>
+{% else %}
+<div class="empty">
+  <h3>Aucun client</h3>
+  <p>Renseigne le champ « Client » sur tes projets pour voir apparaître cette page.</p>
+</div>
+{% endif %}
+{% endblock %}

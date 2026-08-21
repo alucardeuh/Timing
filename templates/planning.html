@@ -7,11 +7,11 @@
     <p class="eyebrow">{{ window_start.strftime('%d %b') }} → {{ window_end.strftime('%d %b %Y') }}</p>
     <h1>Planning</h1>
   </div>
-  <div style="display:flex; gap: var(--space-2); align-items:center;">
+  <div class="btn-row">
     <a href="{{ url_for('planning', offset=offset-1, include_provisional=1 if include_provisional else 0) }}" class="btn btn-ghost btn-sm">← 13 sem.</a>
     <a href="{{ url_for('planning', offset=0, include_provisional=1 if include_provisional else 0) }}" class="btn btn-ghost btn-sm">Aujourd'hui</a>
     <a href="{{ url_for('planning', offset=offset+1, include_provisional=1 if include_provisional else 0) }}" class="btn btn-ghost btn-sm">13 sem. →</a>
-    <a href="{{ url_for('planning', offset=offset, include_provisional=0 if include_provisional else 1) }}" class="faint" style="margin-left: var(--space-3); text-decoration: underline;">
+    <a href="{{ url_for('planning', offset=offset, include_provisional=0 if include_provisional else 1) }}" class="faint" style="text-decoration: underline;">
       {{ 'masquer les provisoires' if include_provisional else 'inclure les provisoires' }}
     </a>
   </div>
@@ -19,49 +19,54 @@
 
 {% if rows %}
 <section class="card">
-  <!-- Échelle des semaines -->
-  <div style="display:flex; gap: var(--space-3);">
-    <div style="width:160px; flex-shrink:0;"></div>
-    <div style="flex:1; position:relative; height:18px;">
-      {% for wl in week_labels %}
-      <span class="faint mono" style="position:absolute; left: {{ (wl.idx / window_days * 100)|round(2) }}%;">{{ wl.label }}</span>
-      {% endfor %}
-    </div>
-  </div>
+  <p class="capacity-summary">
+    Charge moyenne <strong class="mono">{{ capacity_summary.avg_load }}%</strong>
+    sur {{ capacity_summary.working_days }} jours ouvrés ·
+    {{ capacity_summary.free_days }} libre(s) ·
+    {{ capacity_summary.heavy_days }} chargé(s) ·
+    {{ capacity_summary.storm_days }} en surcharge.
+  </p>
 
-  <div style="display:flex; gap: var(--space-3);">
-    <div style="width:160px; flex-shrink:0;">
+  <div class="gantt">
+    <div class="gantt-labels">
+      <div class="gantt-scale-spacer"></div>
       {% for row in rows %}
-      <div style="height:34px; display:flex; align-items:center; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; gap:6px;">
-        <span style="width:8px; height:8px; border-radius:50%; background:{{ row.project.color }}; flex-shrink:0;"></span>
-        <a href="{{ url_for('project_detail', project_id=row.project.id) }}" style="overflow:hidden; text-overflow:ellipsis;">{{ row.project.name }}</a>
+      <div class="gantt-label">
+        <span class="pcard-color-dot" style="background:{{ row.project.color }};"></span>
+        <a href="{{ url_for('project_detail', project_id=row.project.id) }}">{{ row.project.name }}</a>
       </div>
       {% endfor %}
-      <div style="height:34px; display:flex; align-items:center; font-size:12.5px; font-weight:600; border-top: 1px solid var(--border-soft); margin-top: var(--space-1); padding-top: var(--space-1);">
-        Charge cumulée
-      </div>
+      <div class="gantt-label gantt-label-total">Charge cumulée</div>
     </div>
 
-    <div style="flex:1; position:relative;">
-      {% if 0 <= today_idx < window_days %}
-      <div class="gantt-today-line" style="left: {{ (today_idx / window_days * 100)|round(2) }}%;"></div>
-      {% endif %}
-
-      {% for row in rows %}
-      <div style="display:grid; grid-template-columns: repeat({{ window_days }}, 1fr); height:34px; align-items:center;">
-        <div class="gantt-bar {{ 'is-provisional' if row.project.status == 'provisional' }} {{ 'is-paused' if row.project.status == 'paused' }}"
-             style="grid-column: {{ row.start_idx + 1 }} / {{ row.end_idx + 2 }}; background:{{ row.project.color }};"
-             title="{{ row.project.name }} — {{ row.project.status }}"></div>
-      </div>
-      {% endfor %}
-
-      <div style="display:grid; grid-template-columns: repeat({{ window_days }}, 1fr); height:34px; border-top: 1px solid var(--border-soft); margin-top: var(--space-1); padding-top: var(--space-1);">
-        {% for day in capacity %}
-        <div class="day-cell level-{{ day.level }} {{ 'has-provisional' if day.has_provisional }} {{ 'is-today' if day.date.isoformat() == today }}"
-             style="border-radius:2px; margin: 0 1px;"
-             data-date="{{ day.date.strftime('%a %d %b') }}" data-pct="{{ day.pct_total }}"
-             data-contributors='{{ day.contributors|tojson }}'></div>
+    <div class="gantt-canvas">
+      <div class="gantt-scale">
+        {% for wl in week_labels %}
+        <span class="gantt-scale-tick mono" style="left: {{ (wl.idx / window_days * 100)|round(2) }}%;">{{ wl.label }}</span>
         {% endfor %}
+      </div>
+
+      <div class="gantt-wrap">
+        {% if 0 <= today_idx < window_days %}
+        <div class="gantt-today-line" style="left: {{ (today_idx / window_days * 100)|round(2) }}%;"></div>
+        {% endif %}
+
+        {% for row in rows %}
+        <div class="gantt-row" style="grid-template-columns: repeat({{ window_days }}, 1fr);">
+          <div class="gantt-bar {{ 'is-provisional' if row.project.status == 'provisional' }} {{ 'is-paused' if row.project.status == 'paused' }} {{ 'clip-start' if row.clipped_start }} {{ 'clip-end' if row.clipped_end }}"
+               style="grid-column: {{ row.start_idx + 1 }} / {{ row.end_idx + 2 }}; background:{{ row.project.color }};"
+               title="{{ row.project.name }} — {{ status_label[row.project.status] }}"></div>
+        </div>
+        {% endfor %}
+
+        <div class="gantt-row gantt-capacity" style="grid-template-columns: repeat({{ window_days }}, 1fr);">
+          {% for day in capacity %}
+          <div class="day-cell level-{{ day.level }} {{ 'has-provisional' if day.has_provisional }} {{ 'is-today' if day.date.isoformat() == today }}"
+               data-date="{{ day.date.strftime('%a %d %b') }}" data-pct="{{ day.pct_total }}"
+               data-off="{{ day.off_reason or '' }}"
+               data-contributors='{{ day.contributors|tojson }}'></div>
+          {% endfor %}
+        </div>
       </div>
     </div>
   </div>
@@ -73,6 +78,7 @@
   <span><span class="swatch" style="background: var(--load-light-bg); border:1px solid var(--load-light);"></span>léger</span>
   <span><span class="swatch" style="background: var(--load-heavy-bg); border:1px solid var(--load-heavy);"></span>chargé</span>
   <span><span class="swatch" style="background: var(--load-storm-bg); border:1px solid var(--load-storm);"></span>tempête</span>
+  <span><span class="swatch swatch-off"></span>non travaillé</span>
   <span>barre hachurée = projet provisoire</span>
 </div>
 {% else %}
@@ -80,5 +86,19 @@
   <h3>Rien à planifier sur cette période</h3>
   <p>Aucun projet actif, provisoire ou en pause ne couvre cette fenêtre de 13 semaines.</p>
 </div>
+{% endif %}
+
+{% if absences %}
+<section class="card section-gap">
+  <div class="card-title-row">
+    <h3>Absences à venir</h3>
+    <a href="{{ url_for('absences') }}" class="faint">gérer →</a>
+  </div>
+  <ul class="plain-list">
+    {% for a in absences %}
+    <li><span class="tag-pill">{{ absence_label[a.kind] }}</span> {{ a.label }} — <span class="mono">{{ a.start_date }} → {{ a.end_date }}</span></li>
+    {% endfor %}
+  </ul>
+</section>
 {% endif %}
 {% endblock %}

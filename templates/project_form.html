@@ -6,45 +6,49 @@
 <div class="page-head">
   <div>
     <p class="eyebrow">{{ 'Édition' if project else 'Nouveau' }}</p>
-    <h1>{{ project.name if project else 'Nouveau projet' }}</h1>
+    <h1>{{ project.name if project and not form_data else 'Nouveau projet' }}</h1>
   </div>
 </div>
 
-<section class="card" style="max-width: 620px;">
+<section class="card" style="max-width: 720px;">
   <form method="post">
-    <div class="field">
-      <label for="name">Nom du projet</label>
-      <input id="name" name="name" type="text" required value="{{ d.name if d else '' }}" placeholder="Refonte site vitrine">
-    </div>
-
     <div class="field-row">
+      <div class="field">
+        <label for="name">Nom du projet</label>
+        <input id="name" name="name" type="text" value="{{ d.name if d else '' }}" required>
+      </div>
       <div class="field">
         <label for="client">Client</label>
         <input id="client" name="client" type="text" value="{{ d.client if d else '' }}" placeholder="Optionnel">
       </div>
+    </div>
+
+    <div class="field-row">
       <div class="field">
         <label for="status">Statut</label>
         <select id="status" name="status">
-          <option value="provisional" {{ 'selected' if d and d.status == 'provisional' }}>Provisoire — pas encore signé</option>
+          <option value="provisional" {{ 'selected' if d and d.status == 'provisional' }}>Provisoire (pas encore signé)</option>
           <option value="confirmed" {{ 'selected' if d and d.status == 'confirmed' }}>Confirmé</option>
-          {% if project %}
-          <option value="paused" {{ 'selected' if project.status == 'paused' }}>En pause</option>
-          <option value="completed" {{ 'selected' if project.status == 'completed' }}>Terminé</option>
-          {% endif %}
+          <option value="paused" {{ 'selected' if d and d.status == 'paused' }}>En pause</option>
+          <option value="completed" {{ 'selected' if d and d.status == 'completed' }}>Terminé</option>
         </select>
+      </div>
+      <div class="field">
+        <label for="start_date">Date de début</label>
+        <input id="start_date" name="start_date" type="date" value="{{ d.start_date if d else today }}" required>
       </div>
     </div>
 
     <div class="field-row">
       <div class="field">
-        <label for="days_per_week">Jours vendus / semaine</label>
-        <input id="days_per_week" name="days_per_week" type="number" step="0.5" min="0.5" required
-               value="{{ d.days_per_week if d else '3' }}">
+        <label for="days_per_week">Jours / semaine</label>
+        <input id="days_per_week" name="days_per_week" type="number" step="0.5" min="0.5" max="7"
+               value="{{ d.days_per_week if d else 2 }}" required>
       </div>
       <div class="field">
         <label for="duration_value">Durée</label>
-        <input id="duration_value" name="duration_value" type="number" step="0.5" min="0.5" required
-               value="{{ d.duration_value if d else '8' }}">
+        <input id="duration_value" name="duration_value" type="number" step="0.5" min="0.5"
+               value="{{ d.duration_value if d else 8 }}" required>
       </div>
       <div class="field">
         <label for="duration_unit">Unité</label>
@@ -57,47 +61,41 @@
 
     <div class="field-row">
       <div class="field">
-        <label for="day_rate">TJM (taux journalier, optionnel)</label>
-        <input id="day_rate" name="day_rate" type="number" step="1" min="0"
-               value="{{ d.day_rate if d and d.day_rate else '' }}" placeholder="ex. 400">
+        <label for="day_rate">Taux journalier ({{ currency }})</label>
+        <input id="day_rate" name="day_rate" type="number" step="10" min="0" value="{{ d.day_rate if d and d.day_rate else '' }}">
+        <p class="field-hint">Si renseigné, le prix total en découle.</p>
       </div>
       <div class="field">
-        <label for="price_total">— ou prix total vendu</label>
-        <input id="price_total" name="price_total" type="number" step="1" min="0"
-               value="{{ d.price_total if d and not (d.day_rate) else '' }}" placeholder="ex. 9600">
-      </div>
-    </div>
-    <p class="field-hint" style="margin-top:-8px; margin-bottom: var(--space-4);">
-      Remplis l'un ou l'autre : le TJM calcule le prix total à partir des jours vendus.
-    </p>
-
-    <div class="field-help-box" id="calc-preview">
-      Jours vendus au total : <strong id="preview-days">—</strong>
-      &nbsp;·&nbsp; Prix total : <strong id="preview-price">—</strong>
-    </div>
-
-    <div class="field-row" style="margin-top: var(--space-4);">
-      <div class="field">
-        <label for="start_date">Date de début</label>
-        <input id="start_date" name="start_date" type="date" required
-               value="{{ d.start_date if d else today }}">
-        <p class="field-hint">Peut être dans le futur pour un projet pas encore commencé.</p>
+        <label for="price_total">ou Prix total ({{ currency }})</label>
+        <input id="price_total" name="price_total" type="number" step="100" min="0" value="{{ d.price_total if d and d.price_total else '' }}">
       </div>
       <div class="field">
-        <label for="hours_per_day">Heures / jour (override, optionnel)</label>
-        <input id="hours_per_day" name="hours_per_day" type="number" step="0.5" min="1"
-               value="{{ d.hours_per_day if d and d.hours_per_day else '' }}" placeholder="défaut : réglages globaux">
+        <label for="hours_per_day">Heures / jour</label>
+        <input id="hours_per_day" name="hours_per_day" type="number" step="0.5" min="0.5" value="{{ d.hours_per_day if d and d.hours_per_day else '' }}">
+        <p class="field-hint">Vide = réglage global. Affichage uniquement.</p>
       </div>
     </div>
 
-    <div class="field">
+    <div class="field-help-box">
+      Volume vendu : <strong id="preview-days">—</strong> · Prix total : <strong id="preview-price">—</strong>
+    </div>
+
+    <div class="field" style="margin-top: var(--space-4);">
       <label for="notes">Notes</label>
-      <textarea id="notes" name="notes" rows="3" placeholder="Contexte, objectifs, contact…">{{ d.notes if d else '' }}</textarea>
+      <textarea id="notes" name="notes" rows="4">{{ d.notes if d else '' }}</textarea>
     </div>
 
-    <div style="display:flex; gap: var(--space-3); margin-top: var(--space-5);">
+    {% if project %}
+    <div class="field">
+      <label for="scope_note">Motif du changement de périmètre</label>
+      <input id="scope_note" name="scope_note" type="text" placeholder="ex. avenant signé le 12/03">
+      <p class="field-hint">Renseigné uniquement si tu modifies les jours/semaine, la durée ou le prix — la valeur d'avant est conservée dans l'historique du projet.</p>
+    </div>
+    {% endif %}
+
+    <div class="btn-row">
       <button type="submit" class="btn btn-primary">{{ 'Enregistrer' if project else 'Créer le projet' }}</button>
-      <a href="{{ url_for('project_detail', project_id=project.id) if project else url_for('dashboard') }}" class="btn btn-ghost">Annuler</a>
+      <a href="{{ url_for('project_detail', project_id=project.id) if project else url_for('projects_list') }}" class="btn btn-ghost">Annuler</a>
     </div>
   </form>
 </section>

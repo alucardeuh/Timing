@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Modifier une saisie — Timing{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">{{ project.name }}</p>
+    <h1>Modifier la saisie</h1>
+  </div>
+</div>
+
+<section class="card" style="max-width: 620px;">
+  <form method="post">
+    <div class="field-row">
+      <div class="field">
+        <label for="entry_date">Date</label>
+        <input id="entry_date" name="entry_date" type="date" value="{{ entry.entry_date }}" required>
+      </div>
+      <div class="field">
+        <label for="percent_of_day">% du jour</label>
+        <input id="percent_of_day" name="percent_of_day" type="number" step="5" min="0" max="300"
+               value="{{ entry.percent_of_day|round(0)|int }}" required>
+      </div>
+    </div>
+    {% if tasks %}
+    <div class="field">
+      <label for="task_id">Tâche</label>
+      <select id="task_id" name="task_id">
+        <option value="">Sans tâche</option>
+        {% for t in tasks %}
+        <option value="{{ t.id }}" {{ 'selected' if entry.task_id == t.id }}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    <div class="field">
+      <label for="note">Note</label>
+      <input id="note" name="note" type="text" value="{{ entry.note or '' }}">
+    </div>
+    <div class="btn-row">
+      <button type="submit" class="btn btn-primary">Enregistrer</button>
+      <a href="{{ url_for('project_detail', project_id=project.id) }}" class="btn btn-ghost">Annuler</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

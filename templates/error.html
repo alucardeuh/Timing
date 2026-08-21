@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Erreur {{ code }} — Timing{% endblock %}
+{% block content %}
+<div class="empty">
+  <p class="eyebrow">Erreur {{ code }}</p>
+  <h3>{{ message }}</h3>
+  <p><a href="{{ url_for('dashboard') }}" class="btn btn-ghost" style="margin-top: var(--space-4);">Retour à l'accueil</a></p>
+</div>
+{% endblock %}

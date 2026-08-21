@@ -2,7 +2,6 @@
 {% block title %}Projets — Timing{% endblock %}
 
 {% block content %}
-{% set status_label = {'provisional': 'provisoire', 'confirmed': 'confirmé', 'paused': 'en pause', 'completed': 'terminé'} %}
 <div class="page-head">
   <div>
     <p class="eyebrow">Vue d'ensemble</p>
@@ -12,36 +11,79 @@
 </div>
 
 <div class="tabs">
-  <a href="{{ url_for('projects_list', status='confirmed') }}" class="{{ 'is-active' if status_filter == 'confirmed' }}">Confirmés</a>
-  <a href="{{ url_for('projects_list', status='provisional') }}" class="{{ 'is-active' if status_filter == 'provisional' }}">Provisoires</a>
-  <a href="{{ url_for('projects_list', status='paused') }}" class="{{ 'is-active' if status_filter == 'paused' }}">En pause</a>
-  <a href="{{ url_for('projects_list', status='completed') }}" class="{{ 'is-active' if status_filter == 'completed' }}">Terminés</a>
-  <a href="{{ url_for('projects_list', status='all') }}" class="{{ 'is-active' if status_filter == 'all' }}">Tous</a>
+  <a href="{{ url_for('projects_list', status='all', q=search or none) }}" class="{{ 'is-active' if status_filter == 'all' }}">Tous <span class="tab-count">{{ counts.all }}</span></a>
+  <a href="{{ url_for('projects_list', status='confirmed', q=search or none) }}" class="{{ 'is-active' if status_filter == 'confirmed' }}">Confirmés <span class="tab-count">{{ counts.confirmed }}</span></a>
+  <a href="{{ url_for('projects_list', status='provisional', q=search or none) }}" class="{{ 'is-active' if status_filter == 'provisional' }}">Provisoires <span class="tab-count">{{ counts.provisional }}</span></a>
+  <a href="{{ url_for('projects_list', status='paused', q=search or none) }}" class="{{ 'is-active' if status_filter == 'paused' }}">En pause <span class="tab-count">{{ counts.paused }}</span></a>
+  <a href="{{ url_for('projects_list', status='completed', q=search or none) }}" class="{{ 'is-active' if status_filter == 'completed' }}">Terminés <span class="tab-count">{{ counts.completed }}</span></a>
+  <a href="{{ url_for('projects_list', status='trash') }}" class="{{ 'is-active' if status_filter == 'trash' }}">Corbeille <span class="tab-count">{{ counts.trash }}</span></a>
 </div>
+
+<form method="get" class="filter-bar">
+  <input type="hidden" name="status" value="{{ status_filter }}">
+  <input type="search" name="q" value="{{ search }}" placeholder="Rechercher un projet, un client, une note…">
+  <select name="client">
+    <option value="">Tous les clients</option>
+    {% for c in clients %}
+    <option value="{{ c.client }}" {{ 'selected' if client == c.client }}>{{ c.client or 'Sans client' }} ({{ c.n }})</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn-ghost btn-sm">Filtrer</button>
+  {% if search or client %}<a href="{{ url_for('projects_list', status=status_filter) }}" class="faint">réinitialiser</a>{% endif %}
+</form>
 
 {% if rows %}
 <section class="card">
+  <div class="grid-scroll">
   <table class="entries">
-    <thead><tr><th>Projet</th><th>Client</th><th>Statut</th><th>Consommé</th><th>Taux réel</th><th>Taux prévu</th></tr></thead>
+    <thead><tr><th>Projet</th><th>Client</th><th>Statut</th><th>Consommé</th><th>Marge / jour</th><th>Vendu / jour</th><th>Facturé</th>{% if trash %}<th></th>{% endif %}</tr></thead>
     <tbody>
       {% for row in rows %}
       {% set stats = row.stats %}
-      <tr onclick="window.location='{{ url_for('project_detail', project_id=row.project.id) }}'" style="cursor:pointer;">
-        <td><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:{{ row.project.color }}; margin-right:8px;"></span><span style="font-family: var(--font-display); font-weight:600;">{{ row.project.name }}</span></td>
+      <tr>
+        <td>
+          <a href="{{ url_for('project_detail', project_id=row.project.id) }}" class="cell-link">
+            <span class="pcard-color-dot" style="background:{{ row.project.color }};"></span>
+            <span class="cell-strong">{{ row.project.name }}</span>
+          </a>
+        </td>
         <td>{{ row.project.client or '—' }}</td>
         <td><span class="pill pill-{{ row.project.status }}">{{ status_label[row.project.status] }}</span></td>
         <td class="mono">{{ stats.pct_consumed }}%</td>
-        <td class="mono">{% if stats.real_hourly_rate %}{{ '%.0f'|format(stats.real_hourly_rate) }}{{ currency }}/h{% else %}—{% endif %}</td>
-        <td class="mono">{% if stats.theoretical_hourly_rate %}{{ '%.0f'|format(stats.theoretical_hourly_rate) }}{{ currency }}/h{% else %}—{% endif %}</td>
+        <td class="mono">{% if stats.real_day_rate %}{{ '%.0f'|format(stats.real_day_rate) }}{{ currency }}{% else %}—{% endif %}</td>
+        <td class="mono">{% if stats.theoretical_day_rate %}{{ '%.0f'|format(stats.theoretical_day_rate) }}{{ currency }}{% else %}—{% endif %}</td>
+        <td class="mono">{{ '%.0f'|format(stats.invoiced) }}{{ currency }}</td>
+        {% if trash %}
+        <td>
+          <form method="post" action="{{ url_for('restore_project', project_id=row.project.id) }}" class="inline-form">
+            <button type="submit" class="btn btn-ghost btn-sm">Restaurer</button>
+          </form>
+        </td>
+        {% endif %}
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </section>
+
+{% if trash %}
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Suppression définitive</h3></div>
+  <p class="muted">Retape le nom exact d'un projet de la corbeille pour l'effacer avec toutes ses saisies, tâches, jalons et coûts. Irréversible.</p>
+  {% for row in rows %}
+  <form method="post" action="{{ url_for('delete_project', project_id=row.project.id) }}" class="danger-row">
+    <span class="cell-strong">{{ row.project.name }}</span>
+    <input name="confirm" type="text" placeholder="retape « {{ row.project.name }} »" required>
+    <button type="submit" class="btn btn-danger btn-sm">Supprimer définitivement</button>
+  </form>
+  {% endfor %}
+</section>
+{% endif %}
 {% else %}
 <div class="empty">
-  <h3>Aucun projet dans cette catégorie</h3>
-  <p>Change de filtre ou <a href="{{ url_for('new_project') }}" style="color: var(--accent-text); text-decoration:underline;">crée un nouveau projet</a>.</p>
+  <h3>Aucun projet dans cette vue</h3>
+  <p>Change de filtre ou <a href="{{ url_for('new_project') }}" class="inline-link">crée un nouveau projet</a>.</p>
 </div>
 {% endif %}
 {% endblock %}

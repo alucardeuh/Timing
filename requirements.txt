@@ -1,1 +1,4 @@
 Flask>=3.0,<4.0
+
+# Développement uniquement (lancer la suite de tests) :
+#   pip install pytest
