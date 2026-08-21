@@ -14,12 +14,12 @@ echo "Installation des dépendances..."
 pip install -q -r requirements.txt
 
 echo ""
-echo "Démarrage de Timing sur http://127.0.0.1:5060"
+echo "Démarrage de Timing sur http://127.0.0.1:5062"
 echo "(laisse cette fenêtre ouverte tant que tu utilises l'app — Ctrl+C ou ferme la fenêtre pour arrêter)"
 echo ""
 
 # Ouvre le navigateur automatiquement une fois le serveur prêt
-( sleep 2 && open http://127.0.0.1:5060 ) &
+( sleep 2 && open http://127.0.0.1:5062 ) &
 
 python3 app.py
 

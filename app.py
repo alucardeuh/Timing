@@ -434,4 +434,4 @@ def inject_globals():
 
 if __name__ == "__main__":
     db.init_db()
-    app.run(debug=True, port=5060)
+    app.run(debug=True, port=5062)
