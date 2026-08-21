@@ -56,7 +56,7 @@ def make_project(**over):
         "days_per_week": 5, "duration_value": 8, "duration_unit": "weeks",
         "day_rate": 500, "price_total": 20000, "hours_per_day": None,
         "start_date": (date.today() - timedelta(days=28)).isoformat(),
-        "color": "#3E8E82", "notes": "", "archived": 0,
+        "color": "#3E8E82", "notes": "", "archived": 0, "weekdays": None,
     }
     project.update(over)
     return project
@@ -77,6 +77,7 @@ def project_data(**over):
         "days_per_week": 5, "duration_value": 8, "duration_unit": "weeks",
         "day_rate": 500, "price_total": 20000, "hours_per_day": None,
         "start_date": date.today().isoformat(), "notes": "", "color": "#3E8E82",
+        "weekdays": None,
     }
     data.update(over)
     return data

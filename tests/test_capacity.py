@@ -166,3 +166,58 @@ def test_prolongation_plafonnee(base):
     cap = calc.daily_capacity([project], lundi, 7, True, {**SETTINGS, "overrun_weeks": 4})
 
     assert all(d["pct_total"] == 0 for d in cap)
+
+
+def test_jours_declares_concentrent_la_charge(base):
+    """Un projet vendu 2 j/semaine sur lundi et mercredi doit remplir CES
+    deux jours, pas s'étaler à 40 % sur les cinq jours ouvrés.
+
+    Le lissage reste le défaut (on ne sait pas toujours quels jours), mais
+    il produisait un planning illisible : « ce projet me prend 40 % de tous
+    mes jours » n'aide pas à décider quand caser le suivant.
+    """
+    from datetime import date, timedelta
+    import calculations as calc
+    from conftest import SETTINGS, make_project
+
+    lundi = calc.week_monday(date.today())
+    project = make_project(days_per_week=2, duration_value=20, weekdays="0,2",
+                           start_date=(lundi - timedelta(days=7)).isoformat())
+    cap = calc.daily_capacity([project], lundi, 7, True, SETTINGS)
+
+    assert cap[0]["pct_total"] == 100.0  # lundi
+    assert cap[1]["pct_total"] == 0.0    # mardi
+    assert cap[2]["pct_total"] == 100.0  # mercredi
+
+
+def test_sans_jours_declares_la_charge_est_lissee(base):
+    from datetime import date, timedelta
+    import calculations as calc
+    from conftest import SETTINGS, make_project
+
+    lundi = calc.week_monday(date.today())
+    project = make_project(days_per_week=2, duration_value=20,
+                           start_date=(lundi - timedelta(days=7)).isoformat())
+    cap = calc.daily_capacity([project], lundi, 7, True, SETTINGS)
+
+    assert [d["pct_total"] for d in cap[:5]] == [40.0] * 5
+
+
+def test_grille_allocation_compare_engage_et_disponible(base):
+    """La ligne de bas de grille doit dire s'il reste de la place."""
+    from datetime import date, timedelta
+    import calculations as calc
+    from conftest import SETTINGS, make_project
+
+    lundi = calc.week_monday(date.today())
+    a = make_project(days_per_week=2, duration_value=20,
+                     start_date=(lundi - timedelta(days=7)).isoformat())
+    b = make_project(id=2, days_per_week=4, duration_value=20,
+                     start_date=(lundi - timedelta(days=7)).isoformat())
+    grid = calc.allocation_grid([a, b], lundi, 2, SETTINGS)
+
+    premiere = grid["totals"][0]
+    assert premiere["capacity"] == 5      # 5 jours ouvrés
+    assert premiere["booked"] == 6.0      # 2 + 4 jours engagés
+    assert premiere["free"] == -1.0
+    assert premiere["over"] is True

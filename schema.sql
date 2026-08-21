@@ -30,6 +30,13 @@ CREATE TABLE IF NOT EXISTS projects (
     hours_per_day   REAL,
 
     start_date      TEXT NOT NULL,
+
+    -- Jours de la semaine effectivement occupés par ce projet, en index
+    -- Python ("0,2" = lundi et mercredi). Vide = réparti sur tous les jours
+    -- ouvrés. Sans ce champ, un projet vendu 2 j/semaine affichait 40 % sur
+    -- les cinq jours ouvrés : une moyenne, pas un planning.
+    weekdays        TEXT,
+
     color           TEXT NOT NULL DEFAULT '#3E8E82',
     notes           TEXT,
 

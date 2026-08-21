@@ -91,6 +91,7 @@ MIGRATIONS = [
     ("entries", "updated_at", "TEXT"),
     ("entries", "hours", "REAL NOT NULL DEFAULT 0"),
     ("costs", "billable", "INTEGER NOT NULL DEFAULT 0"),
+    ("projects", "weekdays", "TEXT"),
 ]
 
 
@@ -243,12 +244,13 @@ def create_project(data):
     conn = get_db()
     cur = conn.execute(
         "INSERT INTO projects (name, client, status, days_per_week, duration_value, "
-        "duration_unit, day_rate, price_total, hours_per_day, start_date, color, notes, "
-        "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "duration_unit, day_rate, price_total, hours_per_day, start_date, weekdays, "
+        "color, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             data["name"], data["client"], data["status"], data["days_per_week"],
             data["duration_value"], data["duration_unit"], data["day_rate"],
             data["price_total"], data["hours_per_day"], data["start_date"],
+            data.get("weekdays") or None,
             data.get("color") or PROJECT_COLORS[0], data["notes"], now_iso(), now_iso(),
         ),
     )
@@ -288,13 +290,13 @@ def update_project(project_id, data, scope_note=""):
     conn = get_db()
     conn.execute(
         "UPDATE projects SET name=?, client=?, status=?, days_per_week=?, duration_value=?, "
-        "duration_unit=?, day_rate=?, price_total=?, hours_per_day=?, start_date=?, notes=?, "
-        "updated_at=? WHERE id=?",
+        "duration_unit=?, day_rate=?, price_total=?, hours_per_day=?, start_date=?, "
+        "weekdays=?, notes=?, updated_at=? WHERE id=?",
         (
             data["name"], data["client"], data["status"], data["days_per_week"],
             data["duration_value"], data["duration_unit"], data["day_rate"],
             data["price_total"], data["hours_per_day"], data["start_date"],
-            data["notes"], now_iso(), project_id,
+            data.get("weekdays") or None, data["notes"], now_iso(), project_id,
         ),
     )
     if before:

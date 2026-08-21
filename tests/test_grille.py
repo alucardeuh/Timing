@@ -2,7 +2,7 @@
 Grille hebdomadaire : validation des dates, atomicité de la sauvegarde, et
 lignes d'affichage qui ne doivent rien écrire en base.
 """
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -93,3 +93,48 @@ def test_ajouter_une_ligne_necrit_rien(base):
 
     assert response.status_code == 200
     assert base.count_entries(pid) == 0
+
+
+def test_la_grille_reaffiche_ce_qui_a_ete_enregistre(base):
+    """La grille doit repartir de l'état enregistré, pas de champs vides.
+
+    En Jinja, `row.values` résout d'abord l'attribut — donc la méthode
+    `dict.values` — au lieu de la clé « values ». Le résultat était
+    silencieux : les données étaient bien écrites en base, mais tous les
+    champs se réaffichaient vides, donnant l'impression que la semaine se
+    réinitialisait à chaque enregistrement.
+    """
+    import app as flask_app
+    flask_app.app.config["CSRF_PROTECT"] = False
+    client = flask_app.app.test_client()
+
+    pid = base.create_project(project_data())
+    lundi = calc.week_monday(date.today())
+    client.post("/semaine/enregistrer", data={
+        "offset": "0",
+        f"cell-{pid}-none-{lundi.isoformat()}": "50",
+        f"cell-{pid}-none-{(lundi + timedelta(days=1)).isoformat()}": "100",
+    })
+
+    html = client.get("/semaine").get_data(as_text=True)
+
+    assert f'name="cell-{pid}-none-{lundi.isoformat()}"\n                   value="50"' in html \
+        or f'value="50"' in html
+    assert 'value="100"' in html
+
+
+def test_enregistrer_deux_fois_naltere_rien(base):
+    """Renvoyer le formulaire tel quel doit être idempotent."""
+    import app as flask_app
+    flask_app.app.config["CSRF_PROTECT"] = False
+    client = flask_app.app.test_client()
+
+    pid = base.create_project(project_data())
+    lundi = calc.week_monday(date.today())
+    data = {"offset": "0", f"cell-{pid}-none-{lundi.isoformat()}": "50"}
+
+    client.post("/semaine/enregistrer", data=data)
+    client.post("/semaine/enregistrer", data=data)
+
+    assert base.count_entries(pid) == 1
+    assert base.entries_aggregate_for(pid)["percent_sum"] == 50

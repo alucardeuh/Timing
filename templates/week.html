@@ -47,7 +47,7 @@
             <input type="number" step="5" min="0" max="300" inputmode="numeric"
                    class="wg-input"
                    name="cell-{{ row.project.id }}-{{ row.task_id or 'none' }}-{{ d.iso }}"
-                   value="{{ row.values[loop.index0]|round(0)|int if row.values[loop.index0] else '' }}"
+                   value="{{ row.pcts[loop.index0]|round(0)|int if row.pcts[loop.index0] else '' }}"
                    placeholder="—" aria-label="{{ row.project.name }} {{ d.num }}">
           </td>
           {% endfor %}

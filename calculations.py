@@ -525,6 +525,39 @@ def tally_segments(project, agg, max_segments=40):
 
 # ------------------------------------------------------------ carte de charge
 
+def project_weekdays(project, settings):
+    """Jours de la semaine occupés par ce projet.
+
+    Si le projet déclare des jours précis, la charge s'y concentre : un
+    projet vendu 2 j/semaine sur lundi et mercredi remplit 100 % de ces deux
+    jours et 0 % des autres. Sinon elle est lissée sur tous les jours
+    ouvrés — un projet à 2 j/semaine affiche alors 40 % partout, ce qui est
+    une moyenne honnête mais pas un planning.
+    """
+    working = working_days_set(settings)
+    try:
+        raw = project["weekdays"]
+    except (KeyError, IndexError):
+        raw = None
+    if not raw:
+        return working, False
+    chosen = {int(part) for part in str(raw).split(",")
+              if part.strip().isdigit() and 0 <= int(part.strip()) <= 6}
+    chosen &= working
+    return (chosen, True) if chosen else (working, False)
+
+
+def project_daily_pct(project, day, settings):
+    """Charge que ce projet pose sur ce jour précis, en pourcentage."""
+    days, explicit = project_weekdays(project, settings)
+    if day.weekday() not in days:
+        return 0.0
+    if explicit:
+        # Réparti sur les seuls jours déclarés, plafonné à la journée pleine.
+        return min(project["days_per_week"] / len(days), 1.0) * 100
+    return project["days_per_week"] / len(days) * 100
+
+
 def project_is_active_on(project, day, overrun_weeks=0):
     """Un projet occupe-t-il ce jour-là ?
 
@@ -581,7 +614,9 @@ def daily_capacity(projects, window_start, window_days, include_provisional,
                     continue
                 if not project_is_active_on(p, day, overrun_weeks):
                     continue
-                daily_pct = p["days_per_week"] / n_working * 100
+                daily_pct = project_daily_pct(p, day, settings)
+                if daily_pct <= 0:
+                    continue
                 overrun = project_is_overrunning(p, day)
                 if p["status"] == "confirmed":
                     pct_confirmed += daily_pct
@@ -1017,3 +1052,139 @@ def cash_forecast(open_milestones, delays, months=3, today=None):
     overdue.sort(key=lambda o: o["expected"])
     return {"months": series, "overdue": overdue,
             "total": round(sum(b["amount"] for b in series), 2)}
+
+
+# ------------------------------------------------ grille d'allocation
+
+def allocation_grid(projects, window_start, weeks, settings, absences=None,
+                    include_provisional=True, today=None):
+    """Grille projets × semaines : combien de jours chaque projet occupe
+    chaque semaine, plus la capacité disponible en regard.
+
+    C'est la vue des outils de planification de charge (Float, Runn) :
+    une barre continue dit seulement « ce projet court de mars à mai », là
+    où un chiffre par semaine dit « cette semaine-là, il me prend 2 jours
+    sur les 5 dont je dispose ». La seconde information est la seule qui
+    permette de décider si on peut accepter un projet de plus.
+    """
+    today = today or date.today()
+    absence_index = build_absence_index(absences or [])
+    working = working_days_set(settings)
+    overrun_weeks = settings.get("overrun_weeks", 4)
+
+    columns = []
+    for w in range(weeks):
+        start = window_start + timedelta(weeks=w)
+        end = start + timedelta(days=6)
+        capacity_days = sum(
+            1 for i in range(7)
+            if (start + timedelta(days=i)).weekday() in working
+            and (start + timedelta(days=i)) not in absence_index
+        )
+        off_days = sum(
+            1 for i in range(7)
+            if (start + timedelta(days=i)).weekday() in working
+            and (start + timedelta(days=i)) in absence_index
+        )
+        columns.append({
+            "start": start, "end": end,
+            "label": start.strftime("%d/%m"),
+            "capacity_days": capacity_days,
+            "off_days": off_days,
+            "is_current": start <= today <= end,
+        })
+
+    rows = []
+    for p in projects:
+        if p["status"] == "provisional" and not include_provisional:
+            continue
+        cells, total = [], 0.0
+        for col in columns:
+            days = 0.0
+            for i in range(7):
+                day = col["start"] + timedelta(days=i)
+                if day in absence_index or not project_is_active_on(p, day, overrun_weeks):
+                    continue
+                days += project_daily_pct(p, day, settings) / 100.0
+            days = round(days, 2)
+            total += days
+            cells.append({
+                # Testé sur le DÉBUT de la semaine : avec la fin, une semaine
+                # qui chevauchait la date de fin prévue passait déjà pour du
+                # dépassement, et le rouge s'étalait d'une semaine de trop.
+                "days": days,
+                "overrun": days > 0 and project_is_overrunning(p, col["start"]),
+            })
+        if total > 0:
+            rows.append({"project": p, "cells": cells, "total": round(total, 2)})
+
+    # Regroupement par client : c'est l'axe de lecture naturel quand on
+    # cherche à savoir qui occupe le planning.
+    groups = {}
+    for row in rows:
+        name = (row["project"]["client"] or "").strip() or "Sans client"
+        groups.setdefault(name, []).append(row)
+    grouped = [{"client": name,
+                "rows": sorted(items, key=lambda r: r["project"]["start_date"]),
+                "totals": [round(sum(r["cells"][i]["days"] for r in items), 2)
+                           for i in range(weeks)]}
+               for name, items in sorted(groups.items())]
+
+    totals = []
+    for i, col in enumerate(columns):
+        booked = round(sum(r["cells"][i]["days"] for r in rows), 2)
+        capacity = col["capacity_days"]
+        totals.append({
+            "booked": booked,
+            "capacity": capacity,
+            "free": round(capacity - booked, 2),
+            "pct": round(booked / capacity * 100, 1) if capacity else 0,
+            "over": booked > capacity,
+        })
+
+    return {"columns": columns, "groups": grouped, "totals": totals, "rows": rows}
+
+
+def late_projects(project_rows, settings, today=None):
+    """Projets en difficulté, du plus grave au moins grave.
+
+    Trois motifs distincts, souvent confondus alors qu'ils appellent des
+    décisions différentes :
+      - `overrun`  : la date de fin est passée, le projet tourne encore ;
+      - `budget`   : les jours vendus sont consommés (ou près de l'être) ;
+      - `pace`     : le budget part plus vite que le temps.
+    """
+    today = today or date.today()
+    threshold = settings.get("budget_alert_pct", 80)
+    late = []
+    for row in project_rows:
+        p, stats = row["project"], row["stats"]
+        if p["status"] not in LIVE_STATUSES:
+            continue
+        reasons, severity = [], 0
+        end = stats["planned_end_date"]
+        if end < today:
+            reasons.append(f"fin prévue dépassée de {(today - end).days} jour(s)")
+            severity = max(severity, 3)
+        if stats["pct_consumed"] >= 100:
+            reasons.append(f"budget dépassé ({stats['pct_consumed']} %)")
+            severity = max(severity, 3)
+        elif stats["pct_consumed"] >= threshold:
+            reasons.append(f"{stats['pct_consumed']} % du budget consommé")
+            severity = max(severity, 1)
+        if stats["pace_status"] == "behind":
+            reasons.append("cadence en retard")
+            severity = max(severity, 2)
+        elif stats["pace_status"] == "tight":
+            reasons.append("cadence tendue")
+            severity = max(severity, 1)
+        if reasons:
+            late.append({
+                "project": p, "stats": stats, "reasons": reasons,
+                "severity": severity,
+                "critical": severity >= 2,
+                "days_remaining": stats["days_remaining"],
+                "end": end,
+            })
+    late.sort(key=lambda item: (-item["severity"], item["stats"]["pct_consumed"] * -1))
+    return late

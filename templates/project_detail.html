@@ -96,6 +96,67 @@
 </section>
 
 <section class="card section-gap">
+  <div class="card-title-row"><h3>Tâches</h3>
+    <span class="faint">optionnel — pour répartir le temps à l'intérieur du projet</span>
+  </div>
+  {% if not tasks %}
+  <div class="field-help-box">
+    Ce projet n'a pas encore de tâche. Une tâche sert à savoir où part ton
+    temps <em>à l'intérieur</em> du projet (maquettes, intégration, réunions
+    client…). Ajoute-la avec le champ en bas de cette section : elle apparaîtra
+    ensuite dans les menus de saisie et dans le Comparatif.
+  </div>
+  {% endif %}
+  {% if breakdown %}
+  {% for row in breakdown %}
+  <div class="task-row">
+    <div class="task-name">{{ row.name }}</div>
+    <div class="task-bar-track"><div class="task-bar-fill" style="width:{{ (row.days / (breakdown[0].days or 1) * 100)|round(1) }}%; background:{{ project.color }};"></div></div>
+    <div class="task-pct">{{ row.days|round(2) }} j</div>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="faint">Pas encore de temps saisi par tâche.</p>
+  {% endif %}
+
+  {% if tasks %}
+  <table class="entries" style="margin-top: var(--space-4);">
+    <tbody>
+      {% for t in tasks %}
+      <tr>
+        <td>
+          <form method="post" action="{{ url_for('rename_task', task_id=t.id) }}" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input name="name" value="{{ t.name }}" class="mini-input" style="width: 220px;">
+            <button type="submit" class="btn btn-ghost btn-sm">Renommer</button>
+          </form>
+          {% if t.archived %}<span class="tag-pill">archivée</span>{% endif %}
+        </td>
+        <td class="row-actions">
+          <form method="post" action="{{ url_for('toggle_task_archive', task_id=t.id) }}" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="archived" value="{{ 0 if t.archived else 1 }}">
+            <button type="submit" class="btn btn-ghost btn-sm">{{ 'Réactiver' if t.archived else 'Archiver' }}</button>
+          </form>
+          <form method="post" action="{{ url_for('delete_task', task_id=t.id) }}" class="inline-form" onsubmit="return confirm('Supprimer cette tâche ? Le temps saisi est conservé sans étiquette.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="btn btn-ghost btn-sm">Suppr.</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('create_task', project_id=project.id) }}" class="quick-add" style="margin-top: var(--space-4);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field field-note"><label>Nouvelle tâche</label><input name="name" type="text" placeholder="Maquettes, Intégration, Réunions client…" required></div>
+    <button type="submit" class="btn btn-ghost">Ajouter</button>
+  </form>
+</section>
+
+<section class="card section-gap">
   <div class="card-title-row"><h3>Argent</h3></div>
   <div class="stat-strip">
     <div class="stat"><div class="stat-num">{{ '%.0f'|format(project.price_total) }}{{ currency }}</div><div class="stat-label">Prix vendu</div></div>
@@ -217,57 +278,6 @@
       <label class="checkbox-pill"><input type="checkbox" name="billable" value="1"> refacturé au client</label>
     </div>
     <button type="submit" class="btn btn-ghost">Ajouter le coût</button>
-  </form>
-</section>
-
-<section class="card section-gap">
-  <div class="card-title-row"><h3>Tâches</h3></div>
-  {% if breakdown %}
-  {% for row in breakdown %}
-  <div class="task-row">
-    <div class="task-name">{{ row.name }}</div>
-    <div class="task-bar-track"><div class="task-bar-fill" style="width:{{ (row.days / (breakdown[0].days or 1) * 100)|round(1) }}%; background:{{ project.color }};"></div></div>
-    <div class="task-pct">{{ row.days|round(2) }} j</div>
-  </div>
-  {% endfor %}
-  {% else %}
-  <p class="faint">Pas encore de temps saisi par tâche.</p>
-  {% endif %}
-
-  {% if tasks %}
-  <table class="entries" style="margin-top: var(--space-4);">
-    <tbody>
-      {% for t in tasks %}
-      <tr>
-        <td>
-          <form method="post" action="{{ url_for('rename_task', task_id=t.id) }}" class="inline-form">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input name="name" value="{{ t.name }}" class="mini-input" style="width: 220px;">
-            <button type="submit" class="btn btn-ghost btn-sm">Renommer</button>
-          </form>
-          {% if t.archived %}<span class="tag-pill">archivée</span>{% endif %}
-        </td>
-        <td class="row-actions">
-          <form method="post" action="{{ url_for('toggle_task_archive', task_id=t.id) }}" class="inline-form">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="archived" value="{{ 0 if t.archived else 1 }}">
-            <button type="submit" class="btn btn-ghost btn-sm">{{ 'Réactiver' if t.archived else 'Archiver' }}</button>
-          </form>
-          <form method="post" action="{{ url_for('delete_task', task_id=t.id) }}" class="inline-form" onsubmit="return confirm('Supprimer cette tâche ? Le temps saisi est conservé sans étiquette.');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="btn btn-ghost btn-sm">Suppr.</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
-
-  <form method="post" action="{{ url_for('create_task', project_id=project.id) }}" class="quick-add" style="margin-top: var(--space-4);">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div class="field field-note"><label>Nouvelle tâche</label><input name="name" type="text" placeholder="Maquettes, Intégration, Réunions client…" required></div>
-    <button type="submit" class="btn btn-ghost">Ajouter</button>
   </form>
 </section>
 

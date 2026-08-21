@@ -586,3 +586,69 @@ table.entries tr:hover td { background: var(--panel-2); }
   .cap-col.week-start { box-shadow: none; }
   .cap-axis-tick:nth-child(even) { display: none; }
 }
+
+/* =====================================================================
+   Grille d'allocation (Planning)
+   Une barre continue dit « ce projet court de mars à mai » ; un chiffre
+   par semaine dit « il me prend 2 jours sur les 5 disponibles ». Seule la
+   seconde information permet de décider d'accepter un projet de plus.
+   ===================================================================== */
+.alloc { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 780px; }
+.alloc th, .alloc td { padding: 6px 4px; text-align: center; }
+.alloc thead th { border-bottom: 1px solid var(--border); vertical-align: bottom; }
+.alloc-name { text-align: left !important; min-width: 210px; padding-left: var(--space-2) !important;
+              white-space: nowrap; }
+.alloc-name a { display: inline; }
+.alloc-week-label { display: block; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.alloc-week-cap { display: block; font-size: 9.5px; color: var(--text-faint); }
+.alloc-week.is-current .alloc-week-label { color: var(--accent-text); font-weight: 600; }
+
+.alloc tbody tr td { border-bottom: 1px solid var(--border-soft); }
+.alloc-client td { background: var(--panel-2); font-weight: 600; font-size: 12px; }
+.alloc-client .alloc-name { text-transform: uppercase; letter-spacing: .04em; font-size: 11px;
+                            color: var(--text-muted); }
+.alloc-cell { min-width: 42px; color: var(--text-muted); }
+.alloc-cell.is-filled { background: var(--accent-light); color: var(--accent-text); font-weight: 600;
+                        border-radius: 3px; }
+.alloc-cell.is-overrun { background: var(--load-storm-bg); color: var(--load-storm);
+                         box-shadow: inset 0 -2px 0 var(--load-storm); }
+.alloc-cell.is-current { box-shadow: inset 2px 0 0 var(--accent); }
+.alloc-total { text-align: right !important; font-weight: 600; padding-right: var(--space-2) !important;
+               white-space: nowrap; }
+
+.alloc tfoot td { border-top: 1px solid var(--border); padding-top: var(--space-2); font-size: 12px; }
+.alloc-load-num { display: block; font-weight: 600; }
+.alloc-load-bar { display: block; height: 3px; margin-top: 3px; background: var(--border-soft);
+                  border-radius: 2px; overflow: hidden; }
+.alloc-load-bar span { display: block; height: 100%; background: var(--accent); }
+.alloc-load.is-over .alloc-load-num { color: var(--load-storm); }
+.alloc-load.is-over .alloc-load-bar span { background: var(--load-storm); }
+
+.tabs .tab-toggle { margin-left: auto; font-size: 12.5px; text-decoration: underline; }
+
+/* =====================================================================
+   Bandeau des projets en difficulté
+   Placé avant tout le reste sur la page d'atterrissage : si un projet
+   déborde, c'est la première chose à voir, pas quelque chose à aller
+   chercher dans une liste d'alertes mêlées.
+   ===================================================================== */
+.danger-banner {
+  background: var(--load-storm-bg); border: 1px solid var(--load-storm);
+  border-left-width: 4px; border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5); margin-bottom: var(--space-5);
+}
+.danger-banner.is-critical { box-shadow: 0 2px 12px rgba(192, 69, 90, .14); }
+.danger-banner-head { display: flex; align-items: center; gap: var(--space-3); }
+.danger-banner-head svg { width: 20px; height: 20px; color: var(--load-storm); flex-shrink: 0; }
+.danger-banner-head h2 { font-size: 16px; margin: 0; color: var(--load-storm); }
+.danger-count { font-family: var(--font-body); font-weight: 500; font-size: 13px;
+                color: var(--text-muted); margin-left: 6px; }
+.danger-list { list-style: none; margin: var(--space-3) 0 0; padding: 0; }
+.danger-list li { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap;
+                  padding: var(--space-2) 0; border-top: 1px solid rgba(192, 69, 90, .18);
+                  font-size: 13.5px; }
+.danger-list li a { font-family: var(--font-display); font-weight: 600; text-decoration: none; }
+.danger-list li a:hover { text-decoration: underline; }
+.danger-list li.is-critical a { color: var(--load-storm); }
+.danger-reasons { color: var(--text-muted); }
+.danger-metric { margin-left: auto; color: var(--text-muted); white-space: nowrap; }

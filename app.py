@@ -45,7 +45,8 @@ def _secret_key():
 
 app.secret_key = _secret_key()
 
-PLANNING_WINDOW_DAYS = 91  # 13 semaines
+PLANNING_WEEKS = 13
+PLANNING_WINDOW_DAYS = PLANNING_WEEKS * 7
 HOME_WINDOW_DAYS = 56      # 8 semaines
 ENTRIES_PER_PAGE = 50
 # Un projet terminé depuis moins de N jours reste saisissable dans la grille.
@@ -202,6 +203,9 @@ def parse_project_form(form):
         "price_total": price_total,
         "hours_per_day": hours_per_day,
         "start_date": req_date(form, "start_date", "Date de début", default_today=True),
+        "weekdays": ",".join(sorted(
+            {v for v in form.getlist("weekdays") if v.isdigit() and 0 <= int(v) <= 6},
+            key=int)) or None,
         "notes": (form.get("notes") or "").strip(),
     }
 
@@ -243,6 +247,14 @@ def project_rows(projects, settings, aggregates=None, costs=None, milestones=Non
             ),
         })
     return rows
+
+
+@app.template_filter("weekday_names")
+def weekday_names_filter(raw):
+    """« 0,2 » → « lun, mer » — lisible dans le planning."""
+    noms = ["lun", "mar", "mer", "jeu", "ven", "sam", "dim"]
+    return ", ".join(noms[int(p)] for p in str(raw or "").split(",")
+                     if p.strip().isdigit() and 0 <= int(p) <= 6)
 
 
 @app.context_processor
@@ -327,6 +339,7 @@ def dashboard():
     missing = calc.missing_days(entries_recent, settings, absences, today)
 
     alerts = calc.build_alerts(rows, capacity, db.list_milestones(), missing, settings, today)
+    late = calc.late_projects(rows, settings, today)
 
     month_start = today.replace(day=1).isoformat()
     year_start = today.replace(month=1, day=1).isoformat()
@@ -342,6 +355,7 @@ def dashboard():
     return render_template(
         "dashboard.html",
         cards=cards, ranked=ranked[:5], loggable=loggable, break_even=break_even,
+        late=late,
         rank_by=rank_by,
         capacity=capacity, capacity_summary=calc.capacity_summary(capacity),
         capacity_scale=calc.capacity_scale(capacity),
@@ -430,11 +444,14 @@ def week():
             "project": project,
             "task_id": task_id,
             "task_name": task_name.get(task_id) if task_id else None,
-            "values": [values.get(d.isoformat(), 0) for d in days],
+            # Surtout PAS "values" : en Jinja, row.values résout d'abord
+            # l'attribut, donc la méthode dict.values — le champ s'affichait
+            # vide quelles que soient les données enregistrées.
+            "pcts": [values.get(d.isoformat(), 0) for d in days],
             "total": round(sum(values.values()), 1),
         })
 
-    day_totals = [round(sum(r["values"][i] for r in rows), 1) for i in range(7)]
+    day_totals = [round(sum(r["pcts"][i] for r in rows), 1) for i in range(7)]
     week_total = round(sum(day_totals), 1)
 
     return render_template(
@@ -660,32 +677,38 @@ def save_day():
 def planning():
     settings = current_settings()
     include_provisional = request.args.get("include_provisional", "1") != "0"
+    view = request.args.get("view", "semaines")
     try:
         offset = int(request.args.get("offset", 0))
     except ValueError:
         offset = 0
+
+    weeks = PLANNING_WEEKS
     window_start = (calc.week_monday(date.today()) - timedelta(days=7)
-                    + timedelta(days=offset * PLANNING_WINDOW_DAYS))
+                    + timedelta(weeks=offset * weeks))
+    window_days = weeks * 7
 
     all_p = db.list_projects()
     projects = [p for p in all_p if p["status"] in ("provisional", "confirmed", "paused")]
-    rows = calc.gantt_rows(projects, window_start, PLANNING_WINDOW_DAYS, settings)
     absences = db.list_absences()
-    capacity = calc.daily_capacity(all_p, window_start, PLANNING_WINDOW_DAYS,
-                                   include_provisional, settings, absences)
 
-    week_labels = [{"idx": i, "label": (window_start + timedelta(days=i)).strftime("%d %b")}
-                   for i in range(0, PLANNING_WINDOW_DAYS, 7)]
+    capacity = calc.daily_capacity(all_p, window_start, window_days,
+                                   include_provisional, settings, absences)
+    grid = calc.allocation_grid(projects, window_start, weeks, settings, absences,
+                                include_provisional)
 
     return render_template(
-        "planning.html", rows=rows, capacity=capacity,
+        "planning.html", grid=grid, capacity=capacity, view=view,
         capacity_summary=calc.capacity_summary(capacity),
         capacity_scale=calc.capacity_scale(capacity),
-        window_days=PLANNING_WINDOW_DAYS,
+        window_days=window_days, weeks=weeks,
+        rows=calc.gantt_rows(projects, window_start, window_days, settings),
         today_idx=(date.today() - window_start).days,
-        week_labels=week_labels, include_provisional=include_provisional,
+        week_labels=[{"idx": i, "label": (window_start + timedelta(days=i)).strftime("%d %b")}
+                     for i in range(0, window_days, 7)],
+        include_provisional=include_provisional,
         offset=offset, window_start=window_start,
-        window_end=window_start + timedelta(days=PLANNING_WINDOW_DAYS - 1),
+        window_end=window_start + timedelta(days=window_days - 1),
         absences=[a for a in absences if a["end_date"] >= date.today().isoformat()],
     )
 
@@ -718,12 +741,12 @@ def new_project():
             data = parse_project_form(request.form)
         except FormError as exc:
             flash(str(exc), "error")
-            return render_template("project_form.html", project=None, form_data=request.form)
+            return render_template("project_form.html", project=None, form_data=request.form, known_clients=db.list_clients())
         data["color"] = db.next_project_color()
         project_id = db.create_project(data)
         flash("Projet créé.", "success")
         return redirect(url_for("project_detail", project_id=project_id))
-    return render_template("project_form.html", project=None, form_data=None)
+    return render_template("project_form.html", project=None, form_data=None, known_clients=db.list_clients())
 
 
 @app.route("/projects/<int:project_id>")
@@ -784,7 +807,7 @@ def edit_project(project_id):
             data = parse_project_form(request.form)
         except FormError as exc:
             flash(str(exc), "error")
-            return render_template("project_form.html", project=project, form_data=request.form)
+            return render_template("project_form.html", project=project, form_data=request.form, known_clients=db.list_clients())
         changed = db.update_project(project_id, data,
                                     scope_note=(request.form.get("scope_note") or ""))
         if changed:
@@ -793,7 +816,7 @@ def edit_project(project_id):
         else:
             flash("Projet mis à jour.", "success")
         return redirect(url_for("project_detail", project_id=project_id))
-    return render_template("project_form.html", project=project, form_data=None)
+    return render_template("project_form.html", project=project, form_data=None, known_clients=db.list_clients())
 
 
 @app.route("/projects/<int:project_id>/status", methods=["POST"])

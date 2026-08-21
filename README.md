@@ -61,7 +61,8 @@ précisément quand un projet en dépassement mangeait les journées à venir.
 
 ## Les pages
 
-- **Aujourd'hui** (`/`) — alertes à traiter, saisie rapide, carte de charge
+- **Aujourd'hui** (`/`) — bandeau rouge des projets en difficulté (fin
+  dépassée, budget consommé, cadence en retard), alertes à traiter, saisie rapide, carte de charge
   sur 8 semaines, chiffre d'affaires du mois et de l'année vs objectifs,
   carnet de commandes, classement de rentabilité, cartes projets.
 - **Jour** (`/jour`) — une carte par projet, un grand champ de pourcentage,
@@ -72,8 +73,12 @@ précisément quand un projet en dépassement mangeait les journées à venir.
   et bas naviguent d'une ligne à l'autre. Une case vide ou à 0 supprime la
   saisie. La grille regroupe par projet et par tâche ; pour une saisie avec
   note détaillée, passe par la fiche projet.
-- **Planning** (`/planning`) — Gantt sur 13 semaines glissantes, aligné avec
-  la bande de charge, absences à venir listées en dessous.
+- **Planning** (`/planning`) — deux vues. **Allocation par semaine** (par
+  défaut) : une grille projets × 13 semaines où chaque case donne le nombre de
+  jours occupés, regroupée par client, avec en bas la comparaison
+  « engagé / disponible » et les jours libres restants. C'est elle qui dit si
+  tu peux accepter un projet de plus. **Calendrier** : le Gantt jour par jour
+  aligné avec la bande de charge.
 - **Projets** (`/projects`) — onglets avec compteurs, recherche plein texte,
   filtre par client, et une **corbeille** : supprimer met de côté, la
   suppression définitive demande de retaper le nom du projet.
@@ -96,6 +101,19 @@ précisément quand un projet en dépassement mangeait les journées à venir.
   seuil de fiabilité, alerte budget, objectifs de CA, exports et sauvegarde.
 
 ## Concepts
+
+**Jours de la semaine.** Un projet peut déclarer les jours qu'il occupe
+réellement (« lundi et mercredi »). La charge s'y concentre alors à 100 %.
+Sans rien déclarer, elle est **lissée** sur tous les jours ouvrés : un projet
+vendu 2 j/semaine apparaît à 40 % du lundi au vendredi — une moyenne honnête,
+mais pas un planning. Cocher les jours rend le planning littéral.
+
+**Clients.** Il n'y a pas de fiche client à créer : un client existe dès qu'un
+projet porte son nom, dans le champ « Client » du formulaire projet. La page
+Clients regroupe ensuite tous les projets portant le même nom.
+
+**Tâches.** Optionnelles, elles se créent depuis la fiche d'un projet et
+servent à savoir où part le temps *à l'intérieur* du projet.
 
 **Statuts.** *Provisoire* = vendu mais pas signé : compte dans la charge
 seulement si tu l'y inclus, jamais dans le CA réalisé. Puis *confirmé*,
@@ -151,7 +169,7 @@ pip install pytest
 python3 -m pytest tests/ -q
 ```
 
-68 tests sur les calculs et la couche données : capacité en jours ouvrés,
+73 tests sur les calculs et la couche données : capacité en jours ouvrés,
 dépassement, rentabilité et garde-fous de fiabilité, coût de revient,
 indépendance des jours vis-à-vis du réglage horaire, détection des jours non
 saisis, validation des statuts, corbeille, grille hebdo (dates, atomicité,

@@ -74,7 +74,13 @@
 {% else %}
 <div class="empty">
   <h3>Aucun client</h3>
-  <p>Renseigne le champ « Client » sur tes projets pour voir apparaître cette page.</p>
+  <p>
+    Il n'y a pas de fiche client à créer : un client existe dès qu'un projet
+    porte son nom. Ouvre un projet, clique <strong>Modifier</strong>, et
+    remplis le champ <strong>Client</strong>. Tous les projets portant le même
+    nom seront regroupés ici.
+  </p>
+  <a href="{{ url_for('projects_list') }}" class="btn btn-ghost" style="margin-top: var(--space-4);">Voir mes projets</a>
 </div>
 {% endif %}
 {% endblock %}

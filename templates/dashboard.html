@@ -10,6 +10,35 @@
   <a href="{{ url_for('week') }}" class="btn btn-ghost">Saisir la semaine →</a>
 </div>
 
+{% if late %}
+{% set critiques = late|selectattr('critical')|list %}
+<section class="danger-banner {{ 'is-critical' if critiques }}">
+  <div class="danger-banner-head">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <path d="M12 9v4M12 17h.01"/>
+      <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>
+    </svg>
+    <h2>
+      {{ late|length }} projet{{ 's' if late|length > 1 }} en difficulté
+      {% if critiques %}<span class="danger-count">dont {{ critiques|length }} critique{{ 's' if critiques|length > 1 }}</span>{% endif %}
+    </h2>
+  </div>
+  <ul class="danger-list">
+    {% for item in late %}
+    <li class="{{ 'is-critical' if item.critical }}">
+      <a href="{{ url_for('project_detail', project_id=item.project.id) }}">{{ item.project.name }}</a>
+      {% if item.project.client %}<span class="faint">{{ item.project.client }}</span>{% endif %}
+      <span class="danger-reasons">{{ item.reasons|join(' · ') }}</span>
+      <span class="danger-metric mono">
+        {% if item.days_remaining < 0 %}{{ '%g'|format(item.days_remaining) }} j
+        {% else %}{{ '%g'|format(item.days_remaining) }} j restants{% endif %}
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 {% if alerts %}
 <section class="card">
   <div class="card-title-row"><h3>À regarder</h3></div>

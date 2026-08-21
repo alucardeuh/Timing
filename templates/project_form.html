@@ -20,7 +20,12 @@
       </div>
       <div class="field">
         <label for="client">Client</label>
-        <input id="client" name="client" type="text" value="{{ d.client if d else '' }}" placeholder="Optionnel">
+        <input id="client" name="client" type="text" list="clients-connus"
+               value="{{ d.client if d else '' }}" placeholder="Tape un nom, ou choisis-en un">
+        <datalist id="clients-connus">
+          {% for c in known_clients %}<option value="{{ c.client }}">{% endfor %}
+        </datalist>
+        <p class="field-hint">Il n'y a pas de page pour créer un client : tape simplement son nom ici. La page Clients regroupe ensuite tous les projets portant le même nom.</p>
       </div>
     </div>
 
@@ -75,6 +80,26 @@
         <input id="hours_per_day" name="hours_per_day" type="number" step="0.5" min="0.5" value="{{ d.hours_per_day if d and d.hours_per_day else '' }}">
         <p class="field-hint">Vide = réglage global. Affichage uniquement.</p>
       </div>
+    </div>
+
+    <div class="field">
+      <label>Jours de la semaine occupés</label>
+      <div class="checkbox-row">
+        {% set chosen = (d.weekdays if d and d.weekdays else '')|string %}
+        {% for i in range(7) %}
+        <label class="checkbox-pill {{ 'is-checked' if i|string in chosen.split(',') }}">
+          <input type="checkbox" name="weekdays" value="{{ i }}" {{ 'checked' if i|string in chosen.split(',') }}>
+          {{ ['lun','mar','mer','jeu','ven','sam','dim'][i] }}
+        </label>
+        {% endfor %}
+      </div>
+      <p class="field-hint">
+        Facultatif. Si tu coches lundi et mercredi pour un projet vendu 2 jours
+        par semaine, le planning le place sur ces deux jours à 100 %. Sans rien
+        cocher, la charge est <strong>lissée</strong> sur tous tes jours ouvrés —
+        un projet à 2 j/semaine apparaît alors à 40 % du lundi au vendredi, ce qui
+        est une moyenne et non un planning.
+      </p>
     </div>
 
     <div class="field-help-box">
