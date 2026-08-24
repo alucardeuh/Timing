@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
+import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -452,7 +454,7 @@ def counts_by_status():
     ).fetchall()
     trash = conn.execute("SELECT COUNT(*) AS n FROM projects WHERE archived = 1").fetchone()["n"]
     release_db(conn)
-    counts = {s: 0 for s in PROJECT_STATUSES}
+    counts = dict.fromkeys(PROJECT_STATUSES, 0)
     counts.update({r["status"]: r["n"] for r in rows})
     counts["all"] = sum(counts[s] for s in PROJECT_STATUSES)
     counts["trash"] = trash
@@ -1352,10 +1354,13 @@ def export_projects():
         "p.start_date AS debut, p.days_per_week AS jours_par_semaine, "
         "p.duration_value AS duree, p.duration_unit AS unite_duree, "
         "p.day_rate AS tjm, p.price_total AS prix_total, "
-        "COALESCE((SELECT SUM(percent_of_day) FROM entries WHERE project_id = p.id), 0) / 100.0 AS jours_consommes, "
+        "COALESCE((SELECT SUM(percent_of_day) FROM entries "
+        "          WHERE project_id = p.id), 0) / 100.0 AS jours_consommes, "
         "COALESCE((SELECT SUM(amount) FROM costs WHERE project_id = p.id), 0) AS couts, "
-        "COALESCE((SELECT SUM(amount) FROM milestones WHERE project_id = p.id AND status IN ('invoiced','paid')), 0) AS facture, "
-        "COALESCE((SELECT SUM(amount) FROM milestones WHERE project_id = p.id AND status = 'paid'), 0) AS encaisse "
+        "COALESCE((SELECT SUM(amount) FROM milestones "
+        "          WHERE project_id = p.id AND status IN ('invoiced','paid')), 0) AS facture, "
+        "COALESCE((SELECT SUM(amount) FROM milestones "
+        "          WHERE project_id = p.id AND status = 'paid'), 0) AS encaisse "
         "FROM projects p WHERE p.archived = 0 ORDER BY p.start_date DESC"
     ).fetchall()
     release_db(conn)
@@ -1384,9 +1389,14 @@ def backup_to(destination):
     été copiées. L'API backup() de sqlite3 produit un fichier cohérent qui
     intègre le WAL — c'est la seule sauvegarde censée tout restaurer, elle
     doit vraiment tout contenir.
+
+    Le dossier de destination est créé au besoin : la sauvegarde automatique
+    écrit dans instance/backups/, qui n'existe pas au premier lancement.
     """
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
     source = get_db()
-    target = sqlite3.connect(destination)
+    target = sqlite3.connect(str(destination))
     try:
         with target:
             source.backup(target)
@@ -1491,27 +1501,6 @@ def open_milestones():
     ).fetchall()
     release_db(conn)
     return rows
-
-
-def export_to_invoice():
-    """Jalons à facturer, prêts à être repris dans un outil de facturation.
-
-    Volontairement plat et complet : c'est le format qui survivra au passage
-    à la facturation électronique obligatoire, contrairement à un PDF généré
-    ici.
-    """
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT COALESCE(p.client, '') AS client, p.name AS projet, m.label AS jalon, "
-        "m.amount AS montant_ht, COALESCE(m.due_date, '') AS echeance, "
-        "COALESCE(m.invoice_ref, '') AS reference, "
-        "CASE m.status WHEN 'todo' THEN 'a facturer' ELSE 'facture' END AS statut "
-        "FROM milestones m JOIN projects p ON p.id = m.project_id "
-        "WHERE p.archived = 0 AND m.status != 'paid' "
-        "ORDER BY COALESCE(m.due_date, '9999'), client"
-    ).fetchall()
-    release_db(conn)
-    return [dict(r) for r in rows]
 
 
 # ------------------------------------------------------------- reste à faire
@@ -1645,25 +1634,6 @@ def purge_trash(retention_days=TRASH_RETENTION_DAYS):
 
 # ------------------------------------------------------------- sauvegarde
 
-def backup_to(path):
-    """Copie cohérente de la base vers `path`, via sqlite3.backup().
-
-    En mode WAL, copier le seul fichier principal donne une sauvegarde en
-    retard sur la base réelle : les écritures récentes vivent encore dans le
-    journal.
-    """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = get_db()
-    target = sqlite3.connect(str(path))
-    try:
-        conn.backup(target)
-    finally:
-        target.close()
-        release_db(conn)
-    return path
-
-
 def auto_backup(directory=None, keep=7):
     """Sauvegarde datée au démarrage, avec rotation.
 
@@ -1685,3 +1655,163 @@ def auto_backup(directory=None, keep=7):
         except OSError:
             pass
     return target
+
+
+# ------------------------------------------------------------ restauration
+
+# Tables sans lesquelles un fichier n'est pas une base Timing. Restaurer un
+# fichier SQLite quelconque parce qu'il porte la bonne extension laisserait
+# une app vivante sur une base vide, sans rien dire.
+REQUIRED_TABLES = {"projects", "entries", "settings", "milestones", "clients"}
+
+# En-tête d'un fichier SQLite. Vérifié avant toute chose : sqlite3.connect()
+# CRÉE le fichier au lieu d'échouer quand il n'existe pas ou n'est pas une
+# base, donc « ça se connecte » ne prouve rien du tout.
+SQLITE_MAGIC = b"SQLite format 3\x00"
+
+
+def _stage_for_read(path):
+    """Copie le fichier dans un emplacement temporaire inscriptible, et
+    renvoie le chemin de la copie.
+
+    Ouvrir directement la sauvegarde en lecture seule (`mode=ro`) échouait
+    avec « unable to open database file » : une base produite par
+    sqlite3.backup() conserve `journal_mode=wal`, et SQLite a besoin de
+    créer un fichier -shm à côté pour ouvrir une base WAL, ce que le mode
+    lecture seule lui interdit. Le comportement dépend du système, donc le
+    problème n'apparaissait pas partout — raison de plus pour ne pas s'y
+    fier.
+
+    Travailler sur une copie règle la question définitivement, et présente
+    un second avantage : la sauvegarde d'origine ne peut pas être modifiée,
+    même par accident, et aucun fichier -wal ou -shm ne vient traîner à côté
+    d'elle.
+
+    Les journaux éventuels sont copiés avec le fichier principal : sans eux,
+    une base sélectionnée alors qu'elle est encore vivante serait lue sans
+    ses dernières transactions.
+    """
+    temporaire = Path(tempfile.mkdtemp(prefix="timing-lecture-")) / "base.sqlite3"
+    shutil.copy2(path, temporaire)
+    for suffixe in ("-wal", "-shm"):
+        voisin = Path(str(path) + suffixe)
+        if voisin.exists():
+            shutil.copy2(voisin, Path(str(temporaire) + suffixe))
+    return temporaire
+
+
+def _discard_stage(temporaire):
+    shutil.rmtree(temporaire.parent, ignore_errors=True)
+
+
+def inspect_backup(path):
+    """Décrit un fichier de sauvegarde sans rien restaurer.
+
+    Renvoie (résumé, erreur). Le résumé sert à montrer ce qu'on s'apprête à
+    écraser et par quoi : restaurer à l'aveugle, un soir de panique, c'est
+    le meilleur moyen de perdre les données qu'on essayait de sauver.
+    """
+    path = Path(path)
+    if not path.exists():
+        return None, "Fichier introuvable."
+    with path.open("rb") as handle:
+        if handle.read(16) != SQLITE_MAGIC:
+            return None, "Ce fichier n'est pas une base SQLite."
+
+    temporaire = _stage_for_read(path)
+    conn = sqlite3.connect(str(temporaire))
+    conn.row_factory = sqlite3.Row
+    try:
+        verdict = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        if verdict != "ok":
+            return None, "Ce fichier est une base SQLite, mais elle est corrompue."
+
+        tables = {r["name"] for r in
+                  conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        manquantes = REQUIRED_TABLES - tables
+        if manquantes:
+            return None, ("Ce fichier ne ressemble pas à une base Timing "
+                          f"(tables manquantes : {', '.join(sorted(manquantes))}).")
+
+        resume = {
+            "projects": conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0],
+            "entries": conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0],
+            "clients": conn.execute("SELECT COUNT(*) FROM clients").fetchone()[0],
+            "milestones": conn.execute("SELECT COUNT(*) FROM milestones").fetchone()[0],
+            "last_entry": conn.execute("SELECT MAX(entry_date) FROM entries").fetchone()[0],
+        }
+    except sqlite3.DatabaseError as exc:
+        return None, f"Base illisible ({exc})."
+    finally:
+        conn.close()
+        _discard_stage(temporaire)
+    return resume, None
+
+
+def restore_from(path, keep_secret_key=True):
+    """Remplace le contenu de la base courante par celui du fichier donné.
+
+    Trois précautions qui font toute la différence entre une restauration et
+    une seconde perte de données :
+
+    1. Une sauvegarde de sécurité de l'état ACTUEL est prise d'abord, sous
+       un nom horodaté distinct des sauvegardes quotidiennes. Se tromper de
+       fichier de restauration ne doit pas être irréversible.
+    2. La copie passe par l'API backup() plutôt que par un remplacement de
+       fichier : écraser instance/timing.sqlite3 pendant que des fichiers
+       -wal et -shm traînent à côté produit une base incohérente, et oblige
+       à fermer l'app. Ici, la base vivante reste la même, seul son contenu
+       change.
+    3. La clé de session est conservée. Restaurer une base ancienne aurait
+       sinon ramené son ancienne clé, invalidant la session en cours au
+       prochain démarrage — l'app aurait paru cassée juste après une
+       opération déjà anxiogène.
+    """
+    resume, erreur = inspect_backup(path)
+    if erreur:
+        return None, erreur
+
+    dossier = DB_PATH.parent / "backups"
+    dossier.mkdir(parents=True, exist_ok=True)
+    source_path = Path(path).resolve()
+    # Horodatage à la milliseconde, et vérification que le filet ne tombe
+    # pas sur le fichier qu'on s'apprête à lire. Avec une précision à la
+    # seconde, deux restaurations enchaînées produisaient le même nom : la
+    # seconde écrasait sa propre source avant de la copier, et restaurait
+    # donc l'état qu'elle était censée remplacer.
+    filet = dossier / f"avant-restauration-{datetime.now():%Y-%m-%d-%H%M%S-%f}.sqlite3"
+    while filet.exists() or filet == source_path:
+        filet = dossier / f"avant-restauration-{datetime.now():%Y-%m-%d-%H%M%S-%f}.sqlite3"
+    backup_to(filet)
+
+    cle = get_setting_raw("secret_key") if keep_secret_key else None
+
+    temporaire = _stage_for_read(path)
+    source = sqlite3.connect(str(temporaire))
+    target = get_db()
+    try:
+        with target:
+            source.backup(target)
+    finally:
+        source.close()
+        release_db(target)
+        _discard_stage(temporaire)
+
+    # Le schéma restauré peut dater d'une version antérieure : les
+    # migrations le remettent à niveau avant que la moindre page ne
+    # l'interroge.
+    init_db()
+    if cle:
+        set_setting("secret_key", cle)
+    return {"resume": resume, "safety_backup": filet}, None
+
+
+def list_backups(directory=None):
+    """Sauvegardes disponibles, la plus récente d'abord."""
+    directory = Path(directory or DB_PATH.parent / "backups")
+    if not directory.exists():
+        return []
+    fichiers = sorted(directory.glob("*.sqlite3"), reverse=True)
+    return [{"name": f.name, "path": str(f), "size": f.stat().st_size,
+             "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat(timespec="seconds")}
+            for f in fichiers]

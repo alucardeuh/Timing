@@ -3,10 +3,11 @@ La détection des jours non saisis ne doit jamais signaler un jour où tu ne
 travaillais pas : une alerte qui se déclenche pendant les vacances est une
 alerte qu'on apprend à ignorer.
 """
-from datetime import date, timedelta
+from datetime import date
+
+from conftest import SETTINGS
 
 import calculations as calc
-from conftest import SETTINGS
 
 
 def test_jour_ouvre_sans_saisie_est_signale(base):

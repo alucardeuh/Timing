@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Restaurer une sauvegarde — Timing{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Réglages</p>
+    <h1>Restaurer une sauvegarde</h1>
+  </div>
+  <a href="{{ url_for('settings_page') }}" class="btn btn-ghost btn-sm">Retour aux réglages</a>
+</div>
+
+<section class="card" style="max-width: 640px;">
+  <p class="field-help-box" style="margin-top: 0;">
+    <strong>Restaurer remplace toutes tes données actuelles</strong> par le
+    contenu du fichier choisi. Avant d'écrire quoi que ce soit, Timing prend
+    une sauvegarde de l'état présent dans <code>instance/backups/</code>,
+    sous un nom commençant par <code>avant-restauration</code> : se tromper
+    de fichier ne doit pas être irréversible.
+  </p>
+
+  <form method="post" enctype="multipart/form-data" class="restore-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <div class="field">
+      <label for="backup">Fichier de sauvegarde</label>
+      <input type="file" id="backup" name="backup" accept=".sqlite3,.db,.sqlite" required>
+      <p class="field-hint">
+        Un fichier <code>.sqlite3</code> produit par Timing. Le contenu est
+        vérifié avant restauration : en-tête, intégrité et présence des
+        tables attendues.
+      </p>
+    </div>
+
+    <div class="field">
+      <label for="confirmation">Tape <code>{{ confirmation }}</code> pour confirmer</label>
+      <input type="text" id="confirmation" name="confirmation" autocomplete="off"
+             placeholder="{{ confirmation }}" required>
+      <p class="field-hint">
+        Même garde-fou que la suppression définitive d'un projet : une
+        opération qui écrase tout ne doit pas tenir à un clic mal placé.
+      </p>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Restaurer cette sauvegarde</button>
+  </form>
+</section>
+
+<section class="card section-gap" style="max-width: 640px;">
+  <div class="card-title-row"><h3>Sauvegardes présentes sur cette machine</h3></div>
+  {% if backups %}
+  <p class="muted">
+    Elles sont dans <code>instance/backups/</code>. Pour en restaurer une,
+    sélectionne-la depuis le champ ci-dessus : le navigateur ne permet pas à
+    une page de lire un fichier que tu n'as pas choisi toi-même.
+  </p>
+  {% for b in backups %}
+  <div class="trash-row">
+    <span class="trash-label mono">{{ b.name }}</span>
+    <span class="trash-when mono">{{ (b.size / 1024)|round|int }} Ko</span>
+    <span class="trash-when mono">{{ b.modified[:16]|replace('T', ' ') }}</span>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="faint">
+    Aucune sauvegarde pour l'instant. La première est prise au prochain
+    lancement de l'application.
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

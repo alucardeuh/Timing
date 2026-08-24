@@ -8,9 +8,10 @@ cours, le bilan sert à chiffrer la suivante.
 """
 from datetime import date, timedelta
 
+from conftest import SETTINGS, agg, make_project, project_data
+
 import app as flask_app
 import calculations as calc
-from conftest import SETTINGS, agg, make_project, project_data
 
 VIDE = {"absorbed": 0.0, "rebilled": 0.0}
 RIEN_FACTURE = {"total": 0, "invoiced": 0, "paid": 0}

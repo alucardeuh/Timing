@@ -1,0 +1,65 @@
+# Configuration du linter et de pytest.
+#
+# Ce fichier ne fait pas de Timing un paquet installable : l'app se lance
+# avec `python3 app.py`, pas avec `pip install .`. Il centralise seulement
+# les réglages des outils, pour que la même commande donne le même verdict
+# sur la machine de développement et dans l'intégration continue.
+
+[tool.ruff]
+# 110 plutôt que 79 ou 100 : les requêtes SQL de db.py sont écrites en
+# chaînes concaténées avec les alias en clair, et les couper plus court les
+# rendrait moins lisibles, pas plus. Les huit lignes qui dépassaient
+# vraiment ont été coupées ; celles qui restent tiennent le format.
+line-length = 110
+target-version = "py310"
+exclude = ["venv", "instance", ".git"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # erreurs de style pycodestyle
+    "F",    # erreurs réelles pyflakes (import inutilisé, variable non définie)
+    "W",    # avertissements pycodestyle
+    "I",    # ordre des imports
+    "UP",   # tournures obsolètes
+    "B",    # pièges courants (bugbear)
+    "C4",   # compréhensions inutilement lourdes
+    "SIM",  # simplifications évidentes
+]
+ignore = [
+    # `raise ... from exc` dans les convertisseurs de formulaire : la trace
+    # d'origine n'apprend rien à qui lit « ce champ doit être un nombre »,
+    # et la FormError est destinée à l'utilisateur, pas au développeur.
+    "B904",
+    # Les boucles imbriquées de calcul de charge nomment volontairement
+    # leurs variables courtes (jour, i) ; les renommer n'aiderait personne.
+    "E741",
+    # `if A: return False / if B: return False / return True` reste plus
+    # lisible que la condition booléenne compressée quand chaque branche
+    # porte un motif distinct (jour non ouvré / jour d'absence).
+    "SIM103",
+    # Les gardes `try: ... except OSError: pass` autour des suppressions de
+    # fichiers temporaires : contextlib.suppress y ajouterait un import pour
+    # cacher exactement la même intention.
+    "SIM105",
+    # NamedTemporaryFile(delete=False) est délibéré : le fichier doit
+    # survivre au bloc pour être servi par send_file() ou lu par sqlite3,
+    # et il est supprimé explicitement ensuite. Un gestionnaire de contexte
+    # le détruirait avant usage.
+    "SIM115",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# sqlite3.Row itère sur ses VALEURS, pas sur ses clés : `for k in row` ne
+# fait pas la même chose que `for k in row.keys()`, et la simplification
+# suggérée casserait la lecture des lignes de base.
+"db.py" = ["SIM118"]
+"tests/test_migration.py" = ["SIM118"]
+# Les tests posent TIMING_DB dans conftest avant d'importer db : l'import
+# doit rester après ce réglage, donc pas en tête de fichier.
+"tests/conftest.py" = ["E402"]
+"tests/*.py" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Les tests importent `app` et `db` depuis la racine du dépôt.
+pythonpath = ["."]

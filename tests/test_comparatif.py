@@ -14,8 +14,9 @@ qu'il surveillait.
 import re
 from datetime import date, timedelta
 
-import app as flask_app
 from conftest import project_data
+
+import app as flask_app
 
 
 def _get(client, path):

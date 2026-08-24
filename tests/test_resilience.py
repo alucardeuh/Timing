@@ -7,9 +7,10 @@ faisait échouer le gestionnaire d'erreur 500 en tentant de relire les
 réglages — la personne se retrouvait avec l'écran brut de Werkzeug plutôt
 qu'avec un message compréhensible.
 """
+from conftest import project_data
+
 import app as flask_app
 import db
-from conftest import project_data
 
 
 def test_page_erreur_500_survit_a_une_base_indisponible(base, monkeypatch):

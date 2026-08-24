@@ -1281,7 +1281,8 @@ def build_alerts(project_rows, capacity, milestones, missing, today=None):
             if (today - invoiced).days > 30:
                 alerts.append({
                     "level": "warning",
-                    "text": f"Facture non encaissée depuis plus de 30 jours : {m['label']} ({m['project_name']}).",
+                    "text": (f"Facture non encaissée depuis plus de 30 jours : "
+                             f"{m['label']} ({m['project_name']})."),
                     "url_name": "billing", "url_arg": None,
                 })
 
@@ -1289,7 +1290,8 @@ def build_alerts(project_rows, capacity, milestones, missing, today=None):
     if storm:
         alerts.append({
             "level": "warning",
-            "text": f"{len(storm)} jour(s) en surcharge sur la période affichée, à partir du {storm[0]['date'].isoformat()}.",
+            "text": (f"{len(storm)} jour(s) en surcharge sur la période affichée, "
+                     f"à partir du {storm[0]['date'].isoformat()}."),
             "url_name": "planning", "url_arg": None,
         })
 

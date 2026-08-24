@@ -3,8 +3,9 @@ Le bug le plus sournois de la V1 : changer le réglage "heures par jour"
 recalculait tout l'historique de consommation, parce que les jours étaient
 dérivés des heures figées à la saisie.
 """
-import calculations as calc
 from conftest import SETTINGS, agg, make_project
+
+import calculations as calc
 
 
 def test_jours_independants_du_reglage_horaire(base):

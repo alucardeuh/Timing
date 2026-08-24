@@ -8,10 +8,9 @@ un contact, un TJM habituel ou un délai de paiement.
 import sqlite3
 from pathlib import Path
 
-import pytest
+from conftest import project_data
 
 import app as flask_app
-from conftest import project_data
 
 
 def client_http():
@@ -200,7 +199,7 @@ def test_migration_nocase_ne_bloque_pas_sur_un_doublon_existant(base, tmp_path):
     raw.commit()
     raw.close()
 
-    old_db_path, old_env = base.DB_PATH, __import__("os").environ.get("TIMING_DB")
+    old_db_path = base.DB_PATH
     base.DB_PATH = path
     try:
         base.init_db()  # ne doit pas lever

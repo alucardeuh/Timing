@@ -8,9 +8,10 @@ journée sans recours.
 """
 from datetime import date, timedelta
 
+from conftest import project_data
+
 import app as flask_app
 import calculations as calc
-from conftest import project_data
 
 
 def _client():

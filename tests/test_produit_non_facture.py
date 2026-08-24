@@ -7,9 +7,10 @@ combien d'argent dort dans du travail déjà livré.
 """
 from datetime import date
 
+from conftest import agg, make_project, project_data
+
 import app as flask_app
 import calculations as calc
-from conftest import agg, make_project, project_data
 
 
 def test_produit_moins_facture():

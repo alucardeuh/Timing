@@ -10,8 +10,9 @@ surcharge, échéance qui approche.
 """
 from datetime import date, timedelta
 
-import calculations as calc
 from conftest import SETTINGS, agg, make_project
+
+import calculations as calc
 
 
 def test_budget_depasse_ne_duplique_plus_le_bandeau(base):

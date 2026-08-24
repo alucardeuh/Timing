@@ -13,17 +13,30 @@ import os
 import secrets
 import tempfile
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from flask import (
-    Flask, Response, abort, after_this_request, flash, g, redirect,
-    render_template, request,
-    send_file, session, url_for,
+    Flask,
+    Response,
+    abort,
+    after_this_request,
+    flash,
+    g,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
 )
 
 import calculations as calc
 import db
 
 app = Flask(__name__)
+# Borne haute des envois de fichiers (restauration de sauvegarde). Sans
+# elle, Flask lit en mémoire tout ce qu'on lui poste.
+app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
 
 
 def _secret_key():
@@ -148,6 +161,7 @@ NAV_PAGES = [
     ("Absences", "absences"),
     ("Corbeille", "trash_page"),
     ("Réglages", "settings_page"),
+    ("Restaurer une sauvegarde", "restore_page"),
 ]
 
 
@@ -397,6 +411,13 @@ def inject_globals():
 def not_found(_):
     return render_template("error.html", code=404,
                            message="Cette page n'existe pas."), 404
+
+
+@app.errorhandler(413)
+def too_large(_):
+    return render_template(
+        "error.html", code=413,
+        message="Ce fichier est trop volumineux pour être envoyé."), 413
 
 
 @app.errorhandler(500)
@@ -1528,6 +1549,63 @@ def api_search():
     }
 
 
+# ---------------------------------------------------------- restauration
+
+# Une base Timing d'un indépendant pèse quelques mégaoctets. La borne évite
+# qu'un fichier envoyé par erreur soit entièrement lu en mémoire.
+MAX_RESTORE_BYTES = 200 * 1024 * 1024
+RESTORE_CONFIRMATION = "RESTAURER"
+
+
+@app.route("/reglages/restaurer", methods=["GET", "POST"])
+def restore_page():
+    """Écran de restauration d'une sauvegarde.
+
+    Sans lui, restaurer supposait de fermer l'app, de remplacer
+    instance/timing.sqlite3 à la main et de penser aux fichiers -wal et
+    -shm. Une sauvegarde qu'on ne sait pas restaurer sans terminal, un soir
+    de panique, n'est une sauvegarde qu'à moitié.
+    """
+    if request.method == "POST":
+        fichier = request.files.get("backup")
+        confirmation = (request.form.get("confirmation") or "").strip()
+
+        if confirmation != RESTORE_CONFIRMATION:
+            # Même garde-fou que la suppression définitive d'un projet :
+            # une restauration écrase tout, elle ne doit pas tenir à un
+            # seul clic mal placé.
+            flash(f"Tape « {RESTORE_CONFIRMATION} » pour confirmer.", "error")
+            return redirect(url_for("restore_page"))
+
+        if not fichier or not fichier.filename:
+            flash("Choisis un fichier de sauvegarde.", "error")
+            return redirect(url_for("restore_page"))
+
+        temporaire = tempfile.NamedTemporaryFile(delete=False, suffix=".sqlite3")
+        try:
+            fichier.save(temporaire.name)
+            temporaire.close()
+            resultat, erreur = db.restore_from(temporaire.name)
+        finally:
+            try:
+                os.unlink(temporaire.name)
+            except OSError:
+                pass
+
+        if erreur:
+            flash(erreur, "error")
+            return redirect(url_for("restore_page"))
+
+        resume = resultat["resume"]
+        flash(f"Base restaurée : {resume['projects']} projet(s), "
+              f"{resume['entries']} saisie(s). L'état précédent a été sauvegardé "
+              f"dans {Path(resultat['safety_backup']).name}.", "success")
+        return redirect(url_for("dashboard"))
+
+    return render_template("restore.html", backups=db.list_backups(),
+                           confirmation=RESTORE_CONFIRMATION)
+
+
 # ------------------------------------------------------------- réglages
 
 @app.route("/reglages", methods=["GET", "POST"])
@@ -1560,11 +1638,14 @@ def settings_page():
             db.set_setting("annual_revenue_goal",
                            req_float(request.form, "annual_revenue_goal", "Objectif annuel", 0, default=0))
             db.set_setting("annual_fixed_costs",
-                           req_float(request.form, "annual_fixed_costs", "Charges fixes annuelles", 0, default=0))
+                           req_float(request.form, "annual_fixed_costs",
+                                     "Charges fixes annuelles", 0, default=0))
             db.set_setting("billable_days_per_year",
-                           req_float(request.form, "billable_days_per_year", "Jours facturables par an", 1, 366, default=180))
+                           req_float(request.form, "billable_days_per_year",
+                                     "Jours facturables par an", 1, 366, default=180))
             db.set_setting("overrun_weeks",
-                           req_float(request.form, "overrun_weeks", "Prolongation maximale", 0, 52, default=4))
+                           req_float(request.form, "overrun_weeks",
+                                     "Prolongation maximale", 0, 52, default=4))
         except FormError as exc:
             flash(str(exc), "error")
         else:
@@ -1605,7 +1686,6 @@ def export(kind):
         # facturation électronique obligatoire au format structuré. Le bon
         # investissement est que Timing reste la source de vérité et exporte
         # proprement vers l'outil qui émettra.
-        "to-invoice": (db.export_to_invoice, f"timing-a-facturer-{stamp}.csv"),
     }
     if kind not in exporters:
         abort(404)

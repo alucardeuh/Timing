@@ -1,8 +1,9 @@
 """
 Protections des routes qui modifient l'état.
 """
-import app as flask_app
 from conftest import project_data
+
+import app as flask_app
 
 
 def client(csrf=True):

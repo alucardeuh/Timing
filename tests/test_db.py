@@ -4,7 +4,6 @@ grille hebdo, et migrations. Ce sont les garde-fous qui manquaient en V1,
 où un statut arbitraire pouvait entrer en base et faire planter l'affichage.
 """
 import pytest
-
 from conftest import project_data
 
 

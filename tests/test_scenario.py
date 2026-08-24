@@ -8,9 +8,10 @@ un projet fantôme à nettoyer si la réponse était non.
 """
 from datetime import date, timedelta
 
+from conftest import SETTINGS, project_data
+
 import app as flask_app
 import calculations as calc
-from conftest import SETTINGS, project_data
 
 
 def _lundi():

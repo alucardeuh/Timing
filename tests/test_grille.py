@@ -4,10 +4,9 @@ lignes d'affichage qui ne doivent rien écrire en base.
 """
 from datetime import date, timedelta
 
-import pytest
+from conftest import project_data
 
 import calculations as calc
-from conftest import project_data
 
 
 def test_date_invalide_nest_jamais_ecrite(base):
@@ -119,7 +118,7 @@ def test_la_grille_reaffiche_ce_qui_a_ete_enregistre(base):
     html = client.get("/semaine").get_data(as_text=True)
 
     assert f'name="cell-{pid}-none-{lundi.isoformat()}"\n                   value="50"' in html \
-        or f'value="50"' in html
+        or 'value="50"' in html
     assert 'value="100"' in html
 
 

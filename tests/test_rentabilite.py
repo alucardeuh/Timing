@@ -3,8 +3,9 @@ L'indice de rentabilité affichait ×280 sur une heure saisie et remontait en
 tête du classement de la page d'accueil. Ces tests figent les deux garde-fous
 mis en place : seuil de fiabilité, et indice projeté pour les projets en cours.
 """
-import calculations as calc
 from conftest import SETTINGS, agg, make_project
+
+import calculations as calc
 
 
 def test_indice_masque_sur_une_saisie_minuscule(base):
@@ -162,8 +163,10 @@ def test_les_conges_decalent_la_date_de_fin_projetee(base):
     charge : deux vues de la même app racontaient deux histoires.
     """
     from datetime import date, timedelta
-    import calculations as calc
+
     from conftest import SETTINGS, agg, make_project
+
+    import calculations as calc
 
     debut = date.today() - timedelta(days=28)
     project = make_project(start_date=debut.isoformat(), duration_value=8)

@@ -1,0 +1,66 @@
+# Intégration continue.
+#
+# 193 tests ne servent à rien s'ils ne tournent que quand on y pense. Ce
+# workflow les lance à chaque poussée et à chaque pull request, sur deux
+# versions de Python : l'app est locale, mais rien ne dit sur quelle version
+# elle atterrira après un changement de machine.
+
+name: Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  # Déclenchement manuel depuis l'onglet Actions, utile pour vérifier une
+  # branche sans avoir à pousser un commit vide.
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      # Un échec sur une version ne doit pas annuler l'autre : savoir que ça
+      # casse sur 3.12 mais pas sur 3.10 est justement l'information utile.
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest ruff
+
+      - name: Linter
+        # Avant les tests : une erreur de style se corrige en dix secondes,
+        # autant le savoir sans attendre la suite.
+        run: ruff check .
+
+      - name: Tests
+        run: python -m pytest tests/ -q
+
+      - name: Vérifier que l'application démarre
+        # Les tests passent par le client de test de Flask, qui ne touche
+        # jamais au bloc `if __name__ == "__main__"`. Une faute d'étourderie
+        # dans les migrations ou la sauvegarde au démarrage passerait donc
+        # inaperçue jusqu'au premier lancement réel.
+        run: |
+          TIMING_DB=/tmp/ci.sqlite3 timeout 15 python app.py &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:5062/ > /dev/null; then
+              echo "L'application répond."
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "L'application n'a pas répondu dans le temps imparti."
+          exit 1

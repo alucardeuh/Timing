@@ -9,9 +9,10 @@ app qui racontent deux histoires, c'est le pire des deux mondes.
 """
 from datetime import date, timedelta
 
+from conftest import SETTINGS, project_data
+
 import app as flask_app
 import calculations as calc
-from conftest import SETTINGS, project_data
 
 
 def _lundi():

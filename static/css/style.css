@@ -1041,3 +1041,8 @@ kbd {
   .bilan td { display: block; padding: 2px 0; }
   .bilan tr { display: block; padding: var(--space-2) 0; }
 }
+
+/* Restauration : un formulaire aéré, parce qu'on le remplit rarement et
+   souvent dans de mauvaises conditions. */
+.restore-form { display: grid; gap: var(--space-4); margin-top: var(--space-4); }
+.restore-form input[type="file"] { font-size: 13px; }

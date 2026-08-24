@@ -6,8 +6,9 @@ ne puisse le voir, parce qu'elle ne se manifestait qu'à l'écran.
 """
 from pathlib import Path
 
-import app as flask_app
 from conftest import project_data
+
+import app as flask_app
 
 RACINE = Path(__file__).parent.parent
 

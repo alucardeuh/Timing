@@ -127,8 +127,8 @@
     <a href="{{ url_for('export', kind='entries') }}" class="btn btn-ghost btn-sm">Saisies (CSV)</a>
     <a href="{{ url_for('export', kind='projects') }}" class="btn btn-ghost btn-sm">Projets (CSV)</a>
     <a href="{{ url_for('export', kind='milestones') }}" class="btn btn-ghost btn-sm">Facturation (CSV)</a>
-    <a href="{{ url_for('export', kind='to-invoice') }}" class="btn btn-ghost btn-sm">À facturer (CSV)</a>
     <a href="{{ url_for('backup') }}" class="btn btn-primary btn-sm">Sauvegarde complète</a>
+    <a href="{{ url_for('restore_page') }}" class="btn btn-ghost btn-sm">Restaurer…</a>
   </div>
   <p class="field-help-box" style="margin-top: var(--space-4);">
     Une sauvegarde automatique est aussi prise <strong>au premier lancement de

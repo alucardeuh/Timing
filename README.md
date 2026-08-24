@@ -247,24 +247,54 @@ qui est justement celui qu'on veut pouvoir retrouver. Un disque plein ou un
 dossier en lecture seule prive de la sauvegarde du jour, jamais du
 démarrage.
 
-Manuellement : Réglages → Sauvegarde et export. Quatre exports CSV (saisies, projets,
-facturation, à facturer) et une **sauvegarde complète**, produite par
+Manuellement : Réglages → Sauvegarde et export. Trois exports CSV (saisies,
+projets, facturation) et une **sauvegarde complète**, produite par
 `sqlite3.backup()` : en mode WAL, copier le fichier principal seul aurait
 donné une sauvegarde en retard sur la base réelle.
 
-L'export « à facturer » est volontairement plat et complet. C'est le format
-qui survivra à la facturation électronique obligatoire (réception au
-1er septembre 2026, émission au format structuré pour les TPE au
-1er septembre 2027) — un générateur de PDF maison serait hors-jeu d'ici là.
+**Restaurer** : Réglages → Sauvegarde et export → Restaurer. Choisis un
+fichier, tape `RESTAURER` pour confirmer. Avant d'écrire quoi que ce soit,
+l'état actuel part dans `instance/backups/avant-restauration-…` : se tromper
+de fichier ne doit pas être irréversible. Le fichier proposé est vérifié
+(en-tête SQLite, intégrité, tables attendues), le schéma est migré s'il date
+d'une version antérieure, et la clé de session est conservée — restaurer une
+base ancienne aurait sinon invalidé la session au démarrage suivant, faisant
+paraître l'app cassée juste après une opération déjà anxiogène.
 
-## Tests
+La lecture d'une sauvegarde se fait sur une copie temporaire, jamais sur le
+fichier d'origine. Une base produite par `sqlite3.backup()` conserve
+`journal_mode=wal`, et SQLite doit créer un fichier `-shm` à côté pour
+ouvrir une base WAL, ce que le mode lecture seule lui interdit : l'ouverture
+échouait alors sur certains systèmes et pas sur d'autres. Travailler sur une
+copie règle la question et garantit qu'aucun `-wal` ni `-shm` ne vient
+traîner à côté de tes sauvegardes.
+
+La restauration passe par l'API `backup()` et non par un remplacement de
+fichier : écraser `instance/timing.sqlite3` pendant que des fichiers `-wal`
+et `-shm` traînent à côté produit une base incohérente, et oblige à fermer
+l'app.
+
+Timing ne produit aucune facture et ne connaît pas la TVA. Il suit des
+jalons — à facturer, facturé, encaissé — parce que c'est ce qui alimente le
+chiffre d'affaires et le carnet de commandes. Éditer les factures reste le
+travail d'un outil de facturation.
+
+## Tests et linter
 
 ```bash
-pip install pytest
+pip install pytest ruff
 python3 -m pytest tests/ -q
+ruff check .
 ```
 
-179 tests sur les calculs, la couche données et les routes : capacité en
+Les deux tournent aussi à chaque poussée et à chaque pull request, via
+`.github/workflows/tests.yml`, sur Python 3.10 et 3.12. Le workflow vérifie
+en plus que l'application **démarre** : les tests passent par le client de
+test de Flask, qui ne touche jamais au bloc `if __name__ == "__main__"`, et
+une étourderie dans les migrations ou la sauvegarde du démarrage y passerait
+inaperçue jusqu'au premier lancement réel.
+
+200 tests sur les calculs, la couche données et les routes : capacité en
 jours ouvrés, dépassement, rentabilité et garde-fous de fiabilité, coût de
 revient, indépendance des jours vis-à-vis du réglage horaire, détection des
 jours non saisis, validation des statuts, corbeille, grille hebdo (dates,
@@ -284,7 +314,7 @@ simulation de charge (jamais persistée, comptée même provisoires masqués,
 respectueuse des absences, paramètre d'URL absurde sans page 500), produit
 non facturé, sauvegarde automatique (une par jour, rotation, cohérence en
 WAL), et les garanties d'interface qui ne se voyaient qu'à l'écran : aucune
-police chargée depuis le réseau, interface en clair uniquement, bilan de mission (constats
+police chargée depuis le réseau, interface en clair uniquement, restauration (fichier étranger refusé, filet de sécurité posé avant écrasement, clé de session conservée, sauvegarde en WAL lisible, base d'une version antérieure migrée), outillage, bilan de mission (constats
 sur dépassement comme sur économie, silence sur un projet vierge, tâche
 dominante ignorée quand elle n'est pas nommée),
 navigation déclarée une seule fois, feuille d'impression, cellules de charge

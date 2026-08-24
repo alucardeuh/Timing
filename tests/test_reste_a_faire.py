@@ -8,9 +8,10 @@ s'affichaient donc exactement pareil.
 """
 from datetime import date, datetime, timedelta
 
+from conftest import SETTINGS, agg, make_project, project_data
+
 import app as flask_app
 import calculations as calc
-from conftest import SETTINGS, agg, make_project, project_data
 
 
 def _projet(remaining=None, age_days=0, **over):

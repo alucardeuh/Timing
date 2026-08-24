@@ -5,10 +5,11 @@ Toutes les données nécessaires existaient déjà (due_date, invoiced_at,
 paid_at) : il manquait seulement de les croiser avec le délai de paiement
 réellement constaté par client.
 """
-from datetime import date, timedelta
+from datetime import date
+
+from conftest import SETTINGS, agg, make_project, project_data
 
 import calculations as calc
-from conftest import SETTINGS, agg, make_project, project_data
 
 
 def test_delai_de_paiement_calcule_sur_lhistorique(base):

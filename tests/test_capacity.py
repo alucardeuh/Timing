@@ -5,8 +5,9 @@ ouvrés, pas 7.
 """
 from datetime import date, timedelta
 
-import calculations as calc
 from conftest import SETTINGS, make_project
+
+import calculations as calc
 
 
 def monday():
@@ -94,8 +95,10 @@ def test_cadence_dans_les_clous_nest_pas_en_avance(base):
     ce qui est le pire sens pour un outil d'alerte.
     """
     from datetime import date, timedelta
-    import calculations as calc
+
     from conftest import agg, make_project
+
+    import calculations as calc
 
     # 50 % de budget consommé, 50 % de temps écoulé
     project = make_project(start_date=(date.today() - timedelta(days=28)).isoformat())
@@ -106,8 +109,10 @@ def test_cadence_tendue(base):
     """delta = 15 → « tendu », un niveau qui n'existait pas et qui était
     présenté comme normal."""
     from datetime import date, timedelta
-    import calculations as calc
+
     from conftest import agg, make_project
+
+    import calculations as calc
 
     project = make_project(start_date=(date.today() - timedelta(days=28)).isoformat())
     # 65 % consommé pour 50 % écoulé → delta = 15
@@ -124,8 +129,10 @@ def test_projet_en_depassement_porte_encore_sa_charge(base):
     était purement contractuelle et ignorait le réel.
     """
     from datetime import date, timedelta
-    import calculations as calc
+
     from conftest import SETTINGS, make_project
+
+    import calculations as calc
 
     # Projet de 4 semaines démarré il y a 6 semaines : fini depuis 2 semaines
     project = make_project(days_per_week=5, duration_value=4,
@@ -142,8 +149,10 @@ def test_projet_termine_ne_porte_plus_rien(base):
     """La prolongation ne concerne que les projets encore vivants : marquer
     terminé doit libérer la charge immédiatement."""
     from datetime import date, timedelta
-    import calculations as calc
+
     from conftest import SETTINGS, make_project
+
+    import calculations as calc
 
     project = make_project(status="completed", days_per_week=5, duration_value=4,
                            start_date=(date.today() - timedelta(days=42)).isoformat())
@@ -156,8 +165,10 @@ def test_projet_termine_ne_porte_plus_rien(base):
 def test_prolongation_plafonnee(base):
     """Au-delà du plafond, un projet oublié cesse de polluer le planning."""
     from datetime import date, timedelta
-    import calculations as calc
+
     from conftest import SETTINGS, make_project
+
+    import calculations as calc
 
     # Fini depuis 10 semaines, plafond à 4
     project = make_project(days_per_week=5, duration_value=4,
@@ -177,8 +188,10 @@ def test_jours_declares_concentrent_la_charge(base):
     mes jours » n'aide pas à décider quand caser le suivant.
     """
     from datetime import date, timedelta
-    import calculations as calc
+
     from conftest import SETTINGS, make_project
+
+    import calculations as calc
 
     lundi = calc.week_monday(date.today())
     project = make_project(days_per_week=2, duration_value=20, weekdays="0,2",
@@ -192,8 +205,10 @@ def test_jours_declares_concentrent_la_charge(base):
 
 def test_sans_jours_declares_la_charge_est_lissee(base):
     from datetime import date, timedelta
-    import calculations as calc
+
     from conftest import SETTINGS, make_project
+
+    import calculations as calc
 
     lundi = calc.week_monday(date.today())
     project = make_project(days_per_week=2, duration_value=20,
@@ -206,8 +221,10 @@ def test_sans_jours_declares_la_charge_est_lissee(base):
 def test_grille_allocation_compare_engage_et_disponible(base):
     """La ligne de bas de grille doit dire s'il reste de la place."""
     from datetime import date, timedelta
-    import calculations as calc
+
     from conftest import SETTINGS, make_project
+
+    import calculations as calc
 
     lundi = calc.week_monday(date.today())
     a = make_project(days_per_week=2, duration_value=20,
@@ -233,6 +250,7 @@ def test_fin_planifiee_est_une_borne_incluse(base):
     décalée d'un jour.
     """
     from datetime import date
+
     import calculations as calc
 
     project = {"start_date": "2026-03-02", "duration_value": 1,
@@ -245,8 +263,10 @@ def test_une_semaine_vendue_occupe_cinq_jours_ouvres(base):
     """Corollaire du précédent, côté carte de charge : c'est le symptôme
     qu'on voyait réellement à l'écran."""
     from datetime import timedelta
-    import calculations as calc
+
     from conftest import SETTINGS, make_project
+
+    import calculations as calc
 
     lundi = calc.week_monday(date.today())
     project = make_project(days_per_week=5, duration_value=1,
@@ -269,8 +289,10 @@ def test_jours_declares_impossibles_affichent_la_surcharge(base):
     5 — donc annonçait 3 jours libres qui n'existaient pas.
     """
     from datetime import timedelta
-    import calculations as calc
+
     from conftest import SETTINGS, make_project
+
+    import calculations as calc
 
     lundi = calc.week_monday(date.today())
     project = make_project(days_per_week=5, duration_value=20, weekdays="0,1",

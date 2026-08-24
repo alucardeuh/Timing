@@ -9,9 +9,10 @@ db.close_db_for_request() la referme au teardown.
 """
 import sqlite3
 
+from conftest import project_data
+
 import app as flask_app
 import db
-from conftest import project_data
 
 
 def _count_connections(callable_):
@@ -79,9 +80,11 @@ def test_daily_capacity_ne_reparse_pas_les_dates_par_jour(base, monkeypatch):
     plus de travail que nécessaire pour une valeur qui ne change pas d'un
     jour à l'autre pour un même projet. Le profil de charge doit être
     précalculé une fois par projet, pas une fois par (jour, projet)."""
-    import calculations as calc
     from datetime import date, timedelta
+
     from conftest import SETTINGS, make_project
+
+    import calculations as calc
 
     lundi = calc.week_monday(date.today())
     projects = [make_project(id=i, start_date=(lundi - timedelta(days=7)).isoformat(),
