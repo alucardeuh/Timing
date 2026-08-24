@@ -112,16 +112,6 @@
       <p class="field-hint">Un projet non terminé continue d'occuper ta charge au-delà de sa fin prévue, dans cette limite.</p>
     </div>
 
-    <div class="field">
-      <label for="theme">Thème</label>
-      <select id="theme" name="theme">
-        <option value="auto" {{ 'selected' if settings.theme == 'auto' }}>Suivre le système</option>
-        <option value="light" {{ 'selected' if settings.theme == 'light' }}>Clair</option>
-        <option value="dark" {{ 'selected' if settings.theme == 'dark' }}>Sombre</option>
-      </select>
-      <p class="field-hint">Stocké en base, pas dans le navigateur : le réglage suit tes données.</p>
-    </div>
-
     <button type="submit" class="btn btn-primary">Enregistrer</button>
   </form>
 </section>

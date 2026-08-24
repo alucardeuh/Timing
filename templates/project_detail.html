@@ -9,6 +9,7 @@
   </div>
   <div class="btn-row">
     <span class="pill pill-{{ project.status }}">{{ status_label[project.status] }}</span>
+    <a href="{{ url_for('mission_review', project_id=project.id) }}" class="btn btn-ghost btn-sm">Bilan</a>
     <a href="{{ url_for('edit_project', project_id=project.id) }}" class="btn btn-ghost btn-sm">Modifier</a>
     {% if project.status == 'provisional' %}
       <form class="inline-form" method="post" action="{{ url_for('change_status', project_id=project.id) }}">

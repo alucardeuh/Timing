@@ -120,6 +120,15 @@ précisément quand un projet en dépassement mangeait les journées à venir.
   annuel. Ces deux derniers blocs vivaient sur l'accueil : ils relèvent
   d'une revue mensuelle, pas de la question « que dois-je faire
   aujourd'hui », et repoussaient la saisie sous la ligne de flottaison.
+- **Bilan de mission** (`/projects/N/bilan`) — une page par projet, pensée
+  pour tenir sur une feuille : vendu contre réalisé (jours, prix par jour,
+  durée), l'argent, où est parti le temps, ce qui a bougé en cours de route,
+  la facturation. En tête, des **constats calculés** en toutes lettres —
+  « 47,5 jours passés pour 40 vendus, soit +19 % », « il aurait fallu
+  facturer 3 750 € de plus ». Des faits, jamais des conseils : l'app n'a pas
+  les moyens de dire « vends plus cher », elle a ceux de dire ce qui s'est
+  passé. La fiche projet sert à piloter une mission en cours, ce bilan sert
+  à chiffrer la suivante.
 - **Corbeille** (`/corbeille`) — saisies, jalons, coûts et absences
   supprimés, restaurables trente jours. Chaque suppression propose son
   annulation immédiate en bas d'écran.
@@ -255,7 +264,7 @@ pip install pytest
 python3 -m pytest tests/ -q
 ```
 
-166 tests sur les calculs, la couche données et les routes : capacité en
+179 tests sur les calculs, la couche données et les routes : capacité en
 jours ouvrés, dépassement, rentabilité et garde-fous de fiabilité, coût de
 revient, indépendance des jours vis-à-vis du réglage horaire, détection des
 jours non saisis, validation des statuts, corbeille, grille hebdo (dates,
@@ -275,7 +284,9 @@ simulation de charge (jamais persistée, comptée même provisoires masqués,
 respectueuse des absences, paramètre d'URL absurde sans page 500), produit
 non facturé, sauvegarde automatique (une par jour, rotation, cohérence en
 WAL), et les garanties d'interface qui ne se voyaient qu'à l'écran : aucune
-police chargée depuis le réseau, thème refusant une valeur inconnue,
+police chargée depuis le réseau, interface en clair uniquement, bilan de mission (constats
+sur dépassement comme sur économie, silence sur un projet vierge, tâche
+dominante ignorée quand elle n'est pas nommée),
 navigation déclarée une seule fois, feuille d'impression, cellules de charge
 atteignables au clavier, palette sans innerHTML.
 
@@ -289,8 +300,8 @@ calculations.py     logique métier pure, sans Flask ni sqlite3
 db.py               tout le SQL, migrations automatiques, agrégats
 schema.sql          état cible du schéma
 templates/          pages Jinja2
-static/             CSS (thèmes clair et sombre), polices woff2
-                    auto-hébergées, JS sans framework, manifeste PWA
+static/             CSS (thème clair), polices woff2 auto-hébergées,
+                    JS sans framework, manifeste PWA
 tests/              suite pytest
 ```
 
@@ -317,16 +328,7 @@ Tout se fait au clavier, hors des champs de saisie.
 | `←` `→` | dans la carte de charge, passer d'un jour à l'autre |
 | `Échap` | fermer la palette |
 
-## Thème et impression
-
-Le thème suit le système par défaut ; Réglages permet de forcer clair ou
-sombre. Le réglage vit en base et non dans le navigateur : il suit les
-données, pas la machine.
-
-Les couleurs de charge sont réaccordées pour le fond sombre, pas seulement
-assombries. Les fonds pastel d'origine y viraient au gris, et les trois
-niveaux — léger, chargé, tempête — cessaient de se distinguer, ce qui est
-précisément la seule chose que la carte doit faire.
+## Impression
 
 Chaque page s'imprime en A4 paysage sans le rail, les boutons ni les liens
 de filtre, et les grilles à défilement horizontal redeviennent entières :

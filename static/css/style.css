@@ -743,78 +743,17 @@ table.entries tr:hover td { background: var(--panel-2); }
 .client-card .client-metrics { margin-top: auto; }
 
 /* =====================================================================
-   Thème sombre
-   Tout le fichier passant déjà par des variables, un second jeu de
-   tokens suffit. Deux entrées : le réglage explicite (data-theme sur
-   <html>) et, en « auto », la préférence système.
+   Thème
+   Un seul jeu de tokens, clair, déclaré tout en haut de ce fichier. Un
+   thème sombre a existé ici puis a été retiré : maintenir deux palettes
+   cohérentes coûtait un arbitrage à chaque couleur ajoutée, pour une
+   application qu'on ouvre en journée de travail.
 
-   Les couleurs de charge sont réaccordées, pas seulement assombries :
-   sur fond sombre, les fonds pastel d'origine viraient au gris et les
-   trois niveaux — léger, chargé, tempête — cessaient de se distinguer,
-   ce qui est précisément la seule chose que la carte doit faire.
+   color-scheme fixe le rendu natif des champs de formulaire et des barres
+   de défilement. Sans lui, un système réglé en sombre grisait les <select>
+   et les <input type="date"> par-dessus des panneaux blancs.
    ===================================================================== */
-:root[data-theme="dark"],
-:root[data-theme="auto"] {
-  color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root[data-theme="auto"] { color-scheme: dark; }
-}
-
-:root[data-theme="dark"] { color-scheme: dark; }
-
-@media (prefers-color-scheme: dark) {
-  :root[data-theme="auto"] {
-    --bg:          #12151B;
-    --panel:       #191D25;
-    --panel-2:     #212630;
-    --border:      #2C3340;
-    --border-soft: #232935;
-
-    --text:        #E7EAF0;
-    --text-muted:  #9AA3B2;
-    --text-faint:  #6F7889;
-
-    --accent:      #3FA292;
-    --accent-light:#1C3B37;
-    --accent-text: #7BD3C2;
-
-    --load-light:    #46A192;
-    --load-light-bg: #1D3B37;
-    --load-heavy:    #D89A3C;
-    --load-heavy-bg: #3D3020;
-    --load-storm:    #D65A6E;
-    --load-storm-bg: #3E2028;
-
-    --danger:      #D65A6E;
-  }
-}
-
-:root[data-theme="dark"] {
-  --bg:          #12151B;
-  --panel:       #191D25;
-  --panel-2:     #212630;
-  --border:      #2C3340;
-  --border-soft: #232935;
-
-  --text:        #E7EAF0;
-  --text-muted:  #9AA3B2;
-  --text-faint:  #6F7889;
-
-  --accent:      #3FA292;
-  --accent-light:#1C3B37;
-  --accent-text: #7BD3C2;
-
-  --load-light:    #46A192;
-  --load-light-bg: #1D3B37;
-  --load-heavy:    #D89A3C;
-  --load-heavy-bg: #3D3020;
-  --load-storm:    #D65A6E;
-  --load-storm-bg: #3E2028;
-
-  --danger:      #D65A6E;
-}
+:root { color-scheme: light; }
 
 /* =====================================================================
    Barre d'annulation
@@ -1073,4 +1012,32 @@ kbd {
   /* Un support de revue se lit sans replier ni déplier. */
   .capacity-details > summary { display: none; }
   .capacity-details > *:not(summary) { display: revert !important; }
+}
+
+/* =====================================================================
+   Bilan de mission
+   Page conçue pour tenir sur une feuille : peu de blocs, des chiffres
+   alignés, et des constats en toutes lettres plutôt qu'un tableau de
+   plus à interpréter.
+   ===================================================================== */
+.constat-list { margin: 0; padding-left: 1.1em; display: grid; gap: var(--space-2); }
+.constat-list li { line-height: 1.5; }
+
+.bilan { width: 100%; border-collapse: collapse; }
+.bilan th {
+  text-align: left; font-family: var(--font-body); font-weight: 500;
+  color: var(--text-muted); font-size: 13px; width: 130px;
+  padding: 8px var(--space-2) 8px 0;
+}
+.bilan td { padding: 8px var(--space-3) 8px 0; font-size: 13.5px; }
+.bilan tr { border-bottom: 1px solid var(--border-soft); }
+.bilan tr:last-child { border-bottom: 0; }
+/* L'écart est la colonne qu'on lit en premier : elle seule est colorée. */
+.ecart-over { color: var(--load-storm); font-weight: 600; }
+.ecart-under { color: var(--accent-text); font-weight: 600; }
+
+@media (max-width: 620px) {
+  .bilan th { width: auto; display: block; padding-bottom: 0; }
+  .bilan td { display: block; padding: 2px 0; }
+  .bilan tr { display: block; padding: var(--space-2) 0; }
 }

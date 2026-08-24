@@ -383,7 +383,6 @@ def inject_globals():
     settings = current_settings()
     return {
         "undo": session.pop("undo", None),
-        "theme": settings.get("theme", "auto"),
         "csrf_token": session.get("csrf_token", ""),
         "currency": settings["currency_symbol"],
         "today": date.today().isoformat(),
@@ -1436,6 +1435,35 @@ def delete_absence(absence_id):
     return redirect(url_for("absences"))
 
 
+# --------------------------------------------------------- bilan de mission
+
+@app.route("/projects/<int:project_id>/bilan")
+def mission_review(project_id):
+    """Page de bilan : ce qui était vendu, ce qui a été fait, l'écart.
+
+    Rien n'est recalculé ici que la fiche projet ne sache déjà. L'intérêt
+    est ailleurs : la fiche sert à piloter une mission en cours, ce bilan
+    sert à chiffrer la suivante — et il tient sur une feuille.
+    """
+    project = db.get_project(project_id)
+    if not project:
+        abort(404)
+    settings = current_settings()
+    review = calc.mission_review(
+        project,
+        db.entries_aggregate_for(project_id),
+        settings,
+        costs=db.costs_by_project().get(project_id, {"absorbed": 0.0, "rebilled": 0.0}),
+        invoiced=db.milestone_totals_by_project().get(
+            project_id, {"total": 0, "invoiced": 0, "paid": 0}),
+        tasks=db.task_breakdown(project_id),
+        scope_changes=db.list_scope_changes(project_id),
+        milestones=db.list_milestones(project_id),
+    )
+    return render_template("mission_review.html", project=project, review=review,
+                           settings=settings)
+
+
 # ------------------------------------------------------------- corbeille
 
 @app.route("/corbeille")
@@ -1535,8 +1563,6 @@ def settings_page():
                            req_float(request.form, "annual_fixed_costs", "Charges fixes annuelles", 0, default=0))
             db.set_setting("billable_days_per_year",
                            req_float(request.form, "billable_days_per_year", "Jours facturables par an", 1, 366, default=180))
-            theme = (request.form.get("theme") or "auto").strip()
-            db.set_setting("theme", theme if theme in ("auto", "light", "dark") else "auto")
             db.set_setting("overrun_weeks",
                            req_float(request.form, "overrun_weeks", "Prolongation maximale", 0, 52, default=4))
         except FormError as exc:

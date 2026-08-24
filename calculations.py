@@ -1006,10 +1006,21 @@ def weekly_load(capacity, today=None):
     return lignes
 
 
+def _nombre(valeur):
+    """Virgule décimale, pas point : « 13,3 » et non « 13.3 »."""
+    return f"{valeur:g}".replace(".", ",")
+
+
+def _argent(valeur, devise="€"):
+    """« 3 750 € » — espace fine avant le millier, comme partout ailleurs
+    dans l'app. Un montant collé (« 3750 ») se relit deux fois."""
+    return f"{valeur:,.0f}".replace(",", " ") + devise
+
+
 def _jours(valeur):
     """« 1 jour », « 2,5 jours » — la virgule décimale, pas le point."""
     arrondi = round(valeur * 2) / 2      # au demi-jour : l'unité de vente
-    texte = f"{arrondi:g}".replace(".", ",")
+    texte = _nombre(arrondi)
     return f"{texte} jour" if arrondi <= 1 else f"{texte} jours"
 
 
@@ -1033,6 +1044,124 @@ def weekly_headline(lignes):
     if libres < 0.5:
         return "Aucune semaine en surcharge, et plus un jour de libre sur la période."
     return f"Aucune semaine en surcharge. {_jours(libres)} disponibles sur la période."
+
+
+def mission_review(project, agg, settings, costs=0.0, invoiced=None, tasks=None,
+                   scope_changes=None, milestones=None, today=None):
+    """Bilan d'une mission : ce qui était vendu, ce qui a été fait, l'écart.
+
+    Toutes les données existent déjà, éparpillées sur la fiche projet, le
+    comparatif et la facturation. Les rassembler sur une page n'ajoute aucun
+    calcul nouveau, mais change ce qu'on peut en faire : la fiche sert à
+    piloter une mission en cours, ce bilan sert à chiffrer la SUIVANTE.
+
+    Aucune recommandation ici, seulement des constats calculés. « Vends 20 %
+    de plus » serait un conseil que l'app n'a pas les moyens de donner ;
+    « il aurait fallu vendre 47,5 jours pour tenir ton TJM » est un fait.
+    """
+    today = today or date.today()
+    stats = project_stats(project, agg, settings, costs, invoiced, today)
+    devise = settings.get("currency_symbol", "€")
+
+    vendu = total_days_sold(project)
+    passe = days_spent(agg)
+    ecart = round(passe - vendu, 2)
+    ecart_pct = round(ecart / vendu * 100, 1) if vendu > 0 else None
+
+    # Durée calendaire réellement occupée, des premières aux dernières
+    # saisies. Une mission de six semaines étalée sur quatre mois n'a pas
+    # coûté plus de jours, mais elle a occupé la tête plus longtemps.
+    #
+    # Conditionné au fait qu'il y ait des saisies : sur un projet vierge,
+    # des bornes de dates sans aucune journée derrière décriraient une
+    # période pendant laquelle il ne s'est rien passé.
+    a_des_saisies = (agg.get("entries_count") or 0) > 0
+    debut_reel = (parse_date(agg.get("first_date"), None)
+                  if a_des_saisies and agg.get("first_date") else None)
+    fin_reelle = (parse_date(agg.get("last_date"), None)
+                  if a_des_saisies and agg.get("last_date") else None)
+    semaines_reelles = (round(((fin_reelle - debut_reel).days + 1) / 7, 1)
+                        if debut_reel and fin_reelle else None)
+
+    taches = []
+    total_taches = sum(t["days"] for t in (tasks or [])) or 0
+    for t in (tasks or []):
+        taches.append({"name": t["name"], "days": round(t["days"], 2),
+                       "pct": round(t["days"] / total_taches * 100, 1) if total_taches else 0})
+    taches.sort(key=lambda t: t["days"], reverse=True)
+
+    # Délai d'encaissement réellement constaté sur CE projet, pas la moyenne
+    # du client : c'est celui-là qui dit comment s'est passée cette mission.
+    delais = []
+    for m in (milestones or []):
+        if m["status"] == "paid" and m["invoiced_at"] and m["paid_at"]:
+            delais.append((parse_date(m["paid_at"][:10]) - parse_date(m["invoiced_at"][:10])).days)
+    delai_moyen = round(sum(delais) / len(delais)) if delais else None
+
+    constats = []
+    if vendu > 0 and passe > 0:
+        if ecart > 0.5:
+            constats.append(
+                f"{_jours(passe)} passés pour {_jours(vendu)} vendus, "
+                f"soit {ecart_pct:+.0f} %.")
+            if stats["theoretical_day_rate"] and stats["real_day_rate"] is not None:
+                constats.append(
+                    f"Le prix par jour réellement obtenu est de "
+                    f"{_argent(stats['real_day_rate'], devise)} contre "
+                    f"{_argent(stats['theoretical_day_rate'], devise)} vendus.")
+            prix = project_revenue(project, costs)
+            if stats["theoretical_day_rate"]:
+                manque = round(passe * stats["theoretical_day_rate"] - prix, 0)
+                if manque > 0:
+                    constats.append(
+                        f"Pour tenir le prix par jour vendu, il aurait fallu "
+                        f"facturer {_argent(manque, devise)} de plus, ou vendre "
+                        f"{_jours(passe)} dès le départ.")
+        elif ecart < -0.5:
+            constats.append(
+                f"{_jours(passe)} passés pour {_jours(vendu)} vendus : "
+                f"{_jours(-ecart)} de moins que prévu.")
+        else:
+            constats.append(f"Budget tenu : {_jours(passe)} pour {_jours(vendu)} vendus.")
+
+    if semaines_reelles and total_weeks(project):
+        prevu = round(total_weeks(project), 1)
+        if semaines_reelles > prevu * 1.2:
+            constats.append(
+                f"La mission s'est étalée sur {_nombre(semaines_reelles)} semaines "
+                f"pour {_nombre(prevu)} prévues.")
+
+    # Le constat par tâche ne vaut que s'il y a des tâches. Sur un projet
+    # sans découpage, tout le temps tombe dans « Sans tâche » et la phrase
+    # « 100 % du temps est parti sur Sans tâche » n'apprend rien.
+    nommees = [t for t in taches if t["name"] != "Sans tâche"]
+    if nommees and nommees[0]["pct"] >= 40:
+        constats.append(
+            f"{nommees[0]['pct']:.0f} % du temps est parti sur « {nommees[0]['name']} ».")
+
+    if scope_changes:
+        constats.append(
+            f"Le périmètre a changé {len(scope_changes)} fois en cours de route.")
+
+    if delai_moyen is not None:
+        constats.append(f"Les factures ont été encaissées en {delai_moyen} jours en moyenne.")
+
+    return {
+        "stats": stats,
+        "days_sold": vendu,
+        "days_spent": passe,
+        "days_gap": ecart,
+        "days_gap_pct": ecart_pct,
+        "first_entry": debut_reel,
+        "last_entry": fin_reelle,
+        "weeks_planned": round(total_weeks(project), 1),
+        "weeks_actual": semaines_reelles,
+        "tasks": taches,
+        "scope_changes": list(scope_changes or []),
+        "payment_delay": delai_moyen,
+        "milestones": list(milestones or []),
+        "constats": constats,
+    }
 
 
 def capacity_scale(capacity, minimum=120):

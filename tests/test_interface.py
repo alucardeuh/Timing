@@ -36,28 +36,28 @@ def test_les_fichiers_de_police_sont_bien_presents():
         assert police.name in css
 
 
-def test_le_theme_choisi_arrive_dans_la_page(base):
-    base.set_setting("theme", "dark")
-    html = _client().get("/").data.decode()
-    assert 'data-theme="dark"' in html
+def test_l_interface_est_en_clair_uniquement():
+    """Un thème sombre a existé puis a été retiré. Maintenir deux palettes
+    cohérentes coûtait un arbitrage à chaque couleur ajoutée, et les
+    couleurs de charge — léger, chargé, tempête — devaient être réaccordées
+    et pas seulement assombries pour rester distinguables. Ce test empêche
+    qu'une demi-palette revienne par accident."""
+    css = (RACINE / "static" / "css" / "style.css").read_text(encoding="utf-8")
+    assert "prefers-color-scheme" not in css
+    assert "data-theme" not in css
+    assert "color-scheme: light" in css
+
+    base_html = (RACINE / "templates" / "base.html").read_text(encoding="utf-8")
+    assert "data-theme" not in base_html
 
 
-def test_le_theme_refuse_une_valeur_inconnue(base):
-    """Le réglage arrive d'un formulaire, donc de n'importe où : une valeur
-    fantaisiste doit retomber sur « auto », pas se retrouver telle quelle
-    dans un attribut HTML."""
-    client = _client()
-    client.post("/reglages", data={
-        "default_hours_per_day": "7", "currency_symbol": "€",
-        "peak_threshold_warning": "75", "peak_threshold_danger": "100",
-        "working_days": ["0", "1", "2", "3", "4"],
-        "min_consumption_pct": "20", "budget_alert_pct": "80",
-        "monthly_revenue_goal": "0", "annual_revenue_goal": "0",
-        "annual_fixed_costs": "0", "billable_days_per_year": "180",
-        "overrun_weeks": "4", "theme": "'><script>",
-    }, follow_redirects=True)
-
-    assert base.get_settings()["theme"] == "auto"
+def test_aucun_reglage_de_theme_ne_subsiste(base):
+    """Un réglage sans effet est pire qu'un réglage absent : on le change,
+    rien ne bouge, et on doute du reste de la page."""
+    assert "theme" not in base.get_settings()
+    html = _client().get("/reglages").data.decode()
+    assert "Thème" not in html
+    assert 'name="theme"' not in html
 
 
 def test_la_palette_renvoie_un_index_utilisable(base):

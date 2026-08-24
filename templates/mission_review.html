@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Bilan — {{ project.name }}{% endblock %}
+
+{% block content %}
+{% set s = review.stats %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Bilan de mission{% if project.client %} · {{ project.client }}{% endif %}</p>
+    <h1>{{ project.name }}</h1>
+  </div>
+  <div class="btn-row">
+    <a href="{{ url_for('project_detail', project_id=project.id) }}" class="btn btn-ghost btn-sm">Fiche projet</a>
+    {# L'impression passe par le navigateur : Cmd+P produit un PDF sans le
+       rail ni les boutons, grâce à la feuille @media print. #}
+    <button type="button" class="btn btn-sm" onclick="window.print()">Imprimer</button>
+  </div>
+</div>
+
+{% if review.constats %}
+<section class="card">
+  <div class="card-title-row"><h3>Ce que dit cette mission</h3></div>
+  {# Des constats calculés, jamais des conseils : « vends 20 % de plus »
+     serait une recommandation que l'app n'a pas les moyens de donner,
+     « il aurait fallu vendre 47,5 jours » est un fait. #}
+  <ul class="constat-list">
+    {% for c in review.constats %}
+    <li>{{ c }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Vendu / réalisé</h3></div>
+  <table class="bilan">
+    <tbody>
+      <tr>
+        <th>Jours</th>
+        <td class="mono">{{ '%g'|format(review.days_sold) }} vendus</td>
+        <td class="mono">{{ '%g'|format(review.days_spent) }} passés</td>
+        <td class="mono {{ 'ecart-over' if review.days_gap > 0 }} {{ 'ecart-under' if review.days_gap < 0 }}">
+          {% if review.days_gap_pct is not none %}{{ '%+g'|format(review.days_gap) }} j ({{ '%+.0f'|format(review.days_gap_pct) }} %){% else %}—{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th>Prix par jour</th>
+        <td class="mono">{% if s.theoretical_day_rate %}{{ '%.0f'|format(s.theoretical_day_rate) }}{{ currency }} vendu{% else %}—{% endif %}</td>
+        <td class="mono">{% if s.real_day_rate is not none %}{{ '%.0f'|format(s.real_day_rate) }}{{ currency }} obtenu{% else %}pas assez avancé{% endif %}</td>
+        <td class="mono {{ 'ecart-over' if s.real_day_rate is not none and s.theoretical_day_rate and s.real_day_rate < s.theoretical_day_rate }}">
+          {% if s.rentability_index %}×{{ '%.2f'|format(s.rentability_index) }}{% else %}—{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th>Durée</th>
+        <td class="mono">{{ '%g'|format(review.weeks_planned) }} semaines prévues</td>
+        <td class="mono">{% if review.weeks_actual %}{{ '%g'|format(review.weeks_actual) }} semaines réelles{% else %}—{% endif %}</td>
+        <td class="mono faint">
+          {% if review.first_entry %}{{ review.first_entry }} → {{ review.last_entry }}{% endif %}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="stat-strip" style="margin-top: var(--space-4);">
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(project.price_total) }}{{ currency }}</div><div class="stat-label">Prix vendu</div></div>
+    {% if s.costs %}
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(s.costs) }}{{ currency }}</div><div class="stat-label">Coûts absorbés</div></div>
+    {% endif %}
+    {% if s.real_margin is not none %}
+    <div class="stat">
+      <div class="stat-num {{ 'negative-num' if s.real_margin < 0 }}">{{ '%.0f'|format(s.real_margin) }}{{ currency }}</div>
+      <div class="stat-label">Marge réelle</div>
+      <div class="faint">après {{ '%.0f'|format(s.cost_of_days) }}{{ currency }} de coût de tes jours</div>
+    </div>
+    {% else %}
+    <div class="stat">
+      <div class="stat-num">{{ '%.0f'|format(s.net_of_costs) }}{{ currency }}</div>
+      <div class="stat-label">Net de coûts directs</div>
+      <div class="faint">renseigne ton coût de revient pour une vraie marge</div>
+    </div>
+    {% endif %}
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(s.invoiced) }}{{ currency }}</div><div class="stat-label">Facturé</div></div>
+    <div class="stat"><div class="stat-num">{{ '%.0f'|format(s.paid) }}{{ currency }}</div><div class="stat-label">Encaissé</div></div>
+    {% if review.payment_delay is not none %}
+    <div class="stat"><div class="stat-num">{{ review.payment_delay }} j</div><div class="stat-label">Délai d'encaissement</div></div>
+    {% endif %}
+  </div>
+</section>
+
+{% if review.tasks %}
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Où est parti le temps</h3></div>
+  {% for t in review.tasks %}
+  <div class="task-row">
+    <div class="task-name">{{ t.name }}</div>
+    <div class="task-bar-track"><div class="task-bar-fill" style="width:{{ t.pct }}%;"></div></div>
+    <div class="task-pct">{{ '%g'|format(t.days) }} j · {{ t.pct }}%</div>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if review.scope_changes %}
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Ce qui a bougé en cours de route</h3></div>
+  {# Sans cet historique, le contrat initial serait écrasé par ses avenants
+     et il n'y aurait plus rien à analyser après coup. #}
+  <table class="entries">
+    <thead><tr><th>Date</th><th>Champ</th><th>Avant</th><th>Après</th><th>Motif</th></tr></thead>
+    <tbody>
+      {% for c in review.scope_changes %}
+      <tr>
+        <td class="mono">{{ c.changed_at[:10] }}</td>
+        <td>{{ c.field }}</td>
+        <td class="mono faint">{{ c.old_value }}</td>
+        <td class="mono">{{ c.new_value }}</td>
+        <td class="faint">{{ c.note or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if review.milestones %}
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Facturation</h3></div>
+  <table class="entries">
+    <thead><tr><th>Jalon</th><th>Montant</th><th>Échéance</th><th>État</th><th>Référence</th></tr></thead>
+    <tbody>
+      {% for m in review.milestones %}
+      <tr>
+        <td>{{ m.label }}</td>
+        <td class="mono">{{ '%.0f'|format(m.amount) }}{{ currency }}</td>
+        <td class="mono faint">{{ m.due_date or '—' }}</td>
+        <td><span class="pill">{{ milestone_label[m.status] }}</span></td>
+        <td class="mono faint">{{ m.invoice_ref or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+{% endblock %}

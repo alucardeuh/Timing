@@ -63,10 +63,6 @@ DEFAULT_SETTINGS = {
     # temps — sans quoi aucune "marge" affichée n'est une vraie marge.
     "annual_fixed_costs": "0",
     "billable_days_per_year": "180",
-    # Thème d'affichage : auto (suit le système), light, dark. Stocké en
-    # base plutôt qu'en localStorage : l'app est mono-utilisateur et locale,
-    # donc le réglage doit suivre la base, pas le navigateur.
-    "theme": "auto",
 }
 
 PROJECT_COLORS = [
@@ -1006,11 +1002,20 @@ def task_names():
 
 
 def create_task(project_id, name):
+    """Crée une tâche et renvoie son id.
+
+    Ne rien renvoyer obligeait tout appelant voulant rattacher une saisie à
+    la tâche qu'il vient de créer à la relire par son nom — donc à supposer
+    qu'aucune homonyme n'existe sur le même projet.
+    """
     conn = get_db()
-    conn.execute("INSERT INTO tasks (project_id, name, archived, created_at) VALUES (?,?,0,?)",
-                 (project_id, name, now_iso()))
+    cur = conn.execute(
+        "INSERT INTO tasks (project_id, name, archived, created_at) VALUES (?,?,0,?)",
+        (project_id, name, now_iso()))
+    task_id = cur.lastrowid
     conn.commit()
     release_db(conn)
+    return task_id
 
 
 def rename_task(task_id, name):
