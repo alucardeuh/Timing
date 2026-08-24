@@ -31,8 +31,38 @@
     <div class="stat"><div class="stat-num">{{ '%.0f'|format(totals.todo) }}{{ currency }}</div><div class="stat-label">À facturer</div></div>
     <div class="stat"><div class="stat-num">{{ '%.0f'|format(totals.invoiced) }}{{ currency }}</div><div class="stat-label">Facturé, en attente</div></div>
     <div class="stat"><div class="stat-num">{{ '{:,.0f}'.format(revenue.backlog)|replace(',', ' ') }}{{ currency }}</div><div class="stat-label">Carnet de commandes</div></div>
+    <div class="stat">
+      <div class="stat-num {{ 'wip-neg' if wip_total < 0 }}">{{ '{:,.0f}'.format(wip_total)|replace(',', ' ') }}{{ currency }}</div>
+      <div class="stat-label">Produit non facturé</div>
+      <div class="faint">travail déjà fait, pas encore facturé</div>
+    </div>
   </div>
 </section>
+
+{# Travail produit et pas encore facturé, valorisé au TJM vendu. Ni le
+   temps passé ni le CA facturé ne montrent seuls cet écart, qui dit
+   pourtant combien d'argent dort dans du travail déjà livré. #}
+{% if wip_rows %}
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Produit non facturé</h3>
+    <span class="faint mono">{{ '%.0f'|format(wip_total) }}{{ currency }}</span>
+  </div>
+  {% for r in wip_rows %}
+  <div class="wip-row">
+    <a href="{{ url_for('project_detail', project_id=r.project.id) }}" class="cell-link">
+      <span class="pcard-color-dot" style="background:{{ r.project.color }};"></span>{{ r.project.name }}
+    </a>
+    <span class="mono faint">{{ '%.0f'|format(r.produced) }}{{ currency }} produits · {{ '%.0f'|format(r.invoiced) }}{{ currency }} facturés</span>
+    <span class="mono {{ 'wip-neg' if r.wip < 0 }}">{{ '%+.0f'|format(r.wip) }}{{ currency }}</span>
+  </div>
+  {% endfor %}
+  <p class="faint" style="margin-top: var(--space-3);">
+    Une valeur négative veut dire facturé d'avance, ce qui est une
+    information tout aussi utile : elle n'est donc pas ramenée à zéro.
+    La valorisation se fait au prix vendu par jour, pas au coût.
+  </p>
+</section>
+{% endif %}
 
 {% if overdue %}
 <section class="card section-gap">

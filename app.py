@@ -130,6 +130,25 @@ PACE_LABELS = {
 MILESTONE_LABELS = {"todo": "à facturer", "invoiced": "facturé", "paid": "encaissé"}
 ABSENCE_LABELS = {"conges": "congés", "ferie": "férié", "indispo": "indisponible"}
 WEEKDAY_NAMES = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+TRASH_KIND_LABELS = {"entry": "saisie", "milestone": "jalon", "cost": "coût",
+                     "absence": "absence"}
+
+# Source unique de la navigation : le rail, la barre mobile et la palette de
+# commandes lisaient trois listes différentes, donc une page ajoutée
+# n'apparaissait que là où on avait pensé à la déclarer.
+NAV_PAGES = [
+    ("Aujourd'hui", "dashboard"),
+    ("Jour", "day_view"),
+    ("Semaine", "week"),
+    ("Planning", "planning"),
+    ("Projets", "projects_list"),
+    ("Facturation", "billing"),
+    ("Clients", "clients"),
+    ("Comparatif", "comparatif"),
+    ("Absences", "absences"),
+    ("Corbeille", "trash_page"),
+    ("Réglages", "settings_page"),
+]
 
 
 # ------------------------------------------------------------- validation
@@ -348,10 +367,23 @@ def weekday_names_filter(raw):
                      if p.strip().isdigit() and 0 <= int(p) <= 6)
 
 
+def offer_undo(trash_id, label):
+    """Propose l'annulation de la suppression qui vient d'avoir lieu.
+
+    Le message est posé en session plutôt que dans un flash : un flash est
+    du texte échappé, et y coller un lien aurait demandé de le marquer
+    |safe, donc d'ouvrir la porte à l'injection HTML par un nom de projet.
+    """
+    if trash_id:
+        session["undo"] = {"id": trash_id, "label": label}
+
+
 @app.context_processor
 def inject_globals():
     settings = current_settings()
     return {
+        "undo": session.pop("undo", None),
+        "theme": settings.get("theme", "auto"),
         "csrf_token": session.get("csrf_token", ""),
         "currency": settings["currency_symbol"],
         "today": date.today().isoformat(),
@@ -401,25 +433,11 @@ def dashboard():
     capacity = calc.daily_capacity(projects, window_start, HOME_WINDOW_DAYS,
                                    include_provisional, settings, absences)
 
-    # Classement de rentabilité : uniquement les projets dont l'indice est
-    # fiable. Sans ce filtre, un projet avec une heure saisie arrivait
-    # premier avec un ×280 dénué de sens.
-    # Trier par indice seul pousse à optimiser un ratio plutôt que de
-    # l'argent : un ×1,8 sur 2 000 € pèse moins qu'un ×1,05 sur 40 000 €.
-    # Le montant est donc affiché à côté, et le tri est au choix.
-    rank_by = request.args.get("rank", "margin")
-    ranked = [{"project": r["project"],
-               "index": r["stats"]["rentability_index"],
-               "net": r["stats"]["net_of_costs"],
-               "real_margin": r["stats"]["real_margin"],
-               "day_rate": r["stats"]["real_day_rate"]}
-              for r in rows if r["stats"]["rentability_index"] is not None]
-    sort_keys = {
-        "index": lambda r: r["index"] or 0,
-        "margin": lambda r: (r["real_margin"] if r["real_margin"] is not None else r["net"]) or 0,
-        "day_rate": lambda r: r["day_rate"] or 0,
-    }
-    ranked.sort(key=sort_keys.get(rank_by, sort_keys["margin"]), reverse=True)
+    # Le classement de rentabilité et le seuil de rentabilité annuel ont
+    # quitté cette page pour Comparatif. Ce sont des objets de revue
+    # mensuelle : les garder ici allongeait de deux blocs la seule page
+    # qu'on ouvre pour savoir quoi faire aujourd'hui, et repoussait la
+    # saisie sous la ligne de flottaison.
 
     # Projet le plus récemment saisi : cible des boutons de saisie rapide.
     last_project = None
@@ -444,8 +462,6 @@ def dashboard():
         settings,
     )
 
-    break_even = calc.break_even(settings, db.days_spent_between(year_start, today.isoformat()))
-
     # Une seule lecture : les deux valeurs ci-dessous (le détail par projet
     # ET son total) en découlent, plutôt que de refaire la même requête
     # GROUP BY deux fois pour la même page.
@@ -453,9 +469,8 @@ def dashboard():
 
     return render_template(
         "dashboard.html",
-        cards=cards, ranked=ranked[:5], loggable=loggable, break_even=break_even,
+        cards=cards, loggable=loggable,
         late=late,
-        rank_by=rank_by,
         capacity=capacity, capacity_summary=calc.capacity_summary(capacity),
         capacity_scale=calc.capacity_scale(capacity),
         include_provisional=include_provisional,
@@ -695,8 +710,7 @@ def delete_entry(entry_id):
         # ressemble.
         flash("Cette entrée n'existe plus.", "error")
         return redirect(url_for("dashboard"))
-    db.delete_entry(entry_id)
-    flash("Entrée supprimée.", "success")
+    offer_undo(db.delete_entry(entry_id), "Entrée supprimée.")
     return redirect(url_for("project_detail", project_id=entry["project_id"]))
 
 
@@ -796,13 +810,40 @@ def planning():
     projects = [p for p in all_p if p["status"] in ("provisional", "confirmed", "paused")]
     absences = db.list_absences()
 
-    capacity = calc.daily_capacity(all_p, window_start, window_days,
+    # Scénario : un projet fictif ajouté aux calculs, jamais à la base.
+    # Répondre à « puis-je prendre ce projet ? » ne doit pas obliger à
+    # créer le projet, donc à polluer le carnet de commandes et les exports
+    # pour une question qui n'engage encore à rien.
+    scenario, scenario_error = None, None
+    if request.args.get("sim") == "1":
+        try:
+            scenario = calc.scenario_project(
+                (request.args.get("sim_name") or "").strip()[:80] or "Projet simulé",
+                valid_date(request.args.get("sim_start") or date.today().isoformat(),
+                           "Date de début du scénario"),
+                req_float(request.args, "sim_days", "Jours par semaine du scénario", 0.5, 7),
+                req_float(request.args, "sim_duration", "Durée du scénario", 0.5, 260),
+                request.args.get("sim_unit", "weeks"),
+            )
+        except FormError as exc:
+            scenario, scenario_error = None, str(exc)
+
+    capacity = calc.daily_capacity(all_p + ([scenario] if scenario else []),
+                                   window_start, window_days,
                                    include_provisional, settings, absences)
-    grid = calc.allocation_grid(projects, window_start, weeks, settings, absences,
+    grid = calc.allocation_grid(projects + ([scenario] if scenario else []),
+                                window_start, weeks, settings, absences,
                                 include_provisional)
+    impact = None
+    if scenario:
+        base_grid = calc.allocation_grid(projects, window_start, weeks, settings,
+                                         absences, include_provisional)
+        impact = calc.scenario_impact(base_grid, grid)
 
     return render_template(
         "planning.html", grid=grid, capacity=capacity, view=view,
+        scenario=scenario, scenario_error=scenario_error, impact=impact,
+        sim_args={k: v for k, v in request.args.items() if k.startswith("sim")},
         capacity_summary=calc.capacity_summary(capacity),
         capacity_scale=calc.capacity_scale(capacity),
         window_days=window_days, weeks=weeks,
@@ -1059,6 +1100,21 @@ def billing():
         settings,
     )
 
+    # Travail produit et pas encore facturé. Ni le temps passé ni le CA
+    # facturé ne montrent seuls cet écart, qui dit pourtant combien
+    # d'argent dort dans du travail déjà fait.
+    aggregates = db.entries_aggregate_by_project()
+    wip_rows = []
+    for p in projects:
+        if p["status"] not in ("confirmed", "paused", "completed"):
+            continue
+        wip = calc.work_in_progress(p, aggregates.get(p["id"], calc.EMPTY_AGG),
+                                    milestone_totals.get(p["id"], {}))
+        if abs(wip["wip"]) >= 1:
+            wip_rows.append({"project": p, **wip})
+    wip_rows.sort(key=lambda r: r["wip"], reverse=True)
+    wip_total = round(sum(r["wip"] for r in wip_rows), 2)
+
     delays = db.payment_delays()
     forecast = calc.cash_forecast(db.open_milestones(), delays, months=3, today=today,
                                   contractual=db.contractual_delays())
@@ -1069,6 +1125,7 @@ def billing():
         revenue=revenue, chart=calc.bar_chart(monthly, "amount"),
         monthly=monthly, settings=settings,
         forecast=forecast, delays=delays,
+        wip_rows=wip_rows, wip_total=wip_total,
         default_delay=calc.DEFAULT_PAYMENT_DELAY,
     )
 
@@ -1132,8 +1189,7 @@ def delete_milestone(milestone_id):
     milestone = db.get_milestone(milestone_id)
     if not milestone:
         abort(404)
-    db.delete_milestone(milestone_id)
-    flash("Jalon supprimé.", "success")
+    offer_undo(db.delete_milestone(milestone_id), "Jalon supprimé.")
     return redirect(safe_next(request.form.get("next"),
                               url_for("project_detail", project_id=milestone["project_id"])))
 
@@ -1163,8 +1219,7 @@ def delete_cost(cost_id):
     if not project_id:
         flash("Ce coût n'existe plus.", "error")
         return redirect(url_for("dashboard"))
-    db.delete_cost(cost_id)
-    flash("Coût supprimé.", "success")
+    offer_undo(db.delete_cost(cost_id), "Coût supprimé.")
     return redirect(url_for("project_detail", project_id=project_id))
 
 
@@ -1291,10 +1346,36 @@ def comparatif():
         t["pct"] = round(t["days"] / total_days * 100, 1)
         t["days"] = round(t["days"], 2)
 
+    # Classement : uniquement les projets dont l'indice est fiable. Sans ce
+    # filtre, un projet avec une heure saisie arrivait premier avec un ×280
+    # dénué de sens. Trier par indice seul pousse par ailleurs à optimiser
+    # un ratio plutôt que de l'argent : un ×1,8 sur 2 000 € pèse moins qu'un
+    # ×1,05 sur 40 000 €. Le montant est donc affiché à côté, et le tri est
+    # au choix.
+    rank_by = request.args.get("rank", "margin")
+    ranked = [{"project": r["project"],
+               "index": r["stats"]["rentability_index"],
+               "net": r["stats"]["net_of_costs"],
+               "real_margin": r["stats"]["real_margin"],
+               "day_rate": r["stats"]["real_day_rate"]}
+              for r in rows if r["stats"]["rentability_index"] is not None]
+    sort_keys = {
+        "index": lambda r: r["index"] or 0,
+        "margin": lambda r: (r["real_margin"] if r["real_margin"] is not None else r["net"]) or 0,
+        "day_rate": lambda r: r["day_rate"] or 0,
+    }
+    ranked.sort(key=sort_keys.get(rank_by, sort_keys["margin"]), reverse=True)
+
+    today = date.today()
+    year_start = today.replace(month=1, day=1).isoformat()
+    break_even = calc.break_even(settings,
+                                 db.days_spent_between(year_start, today.isoformat()))
+
     activity = db.monthly_activity(12)
     invoiced = db.monthly_invoiced(12)
     return render_template(
         "comparatif.html", rows=rows, task_rows=tasks, tab=tab,
+        ranked=ranked, rank_by=rank_by, break_even=break_even, settings=settings,
         activity=activity, activity_chart=calc.bar_chart(activity, "days"),
         invoiced=invoiced, invoiced_chart=calc.bar_chart(invoiced, "amount"),
     )
@@ -1347,9 +1428,72 @@ def delete_absence(absence_id):
     if not db.get_absence(absence_id):
         flash("Cette absence n'existe plus.", "error")
         return redirect(url_for("absences"))
-    db.delete_absence(absence_id)
-    flash("Absence supprimée.", "success")
+    offer_undo(db.delete_absence(absence_id), "Absence supprimée.")
     return redirect(url_for("absences"))
+
+
+# ------------------------------------------------------------- corbeille
+
+@app.route("/corbeille")
+def trash_page():
+    return render_template("trash.html", items=db.list_trash(),
+                           retention=db.TRASH_RETENTION_DAYS,
+                           kind_labels=TRASH_KIND_LABELS)
+
+
+@app.route("/corbeille/<int:trash_id>/restaurer", methods=["POST"])
+def restore_trash(trash_id):
+    _, error = db.restore_trash(trash_id)
+    flash(error or "Élément restauré.", "error" if error else "success")
+    return redirect(safe_next(request.form.get("next"), url_for("trash_page")))
+
+
+@app.route("/corbeille/vider", methods=["POST"])
+def empty_trash():
+    db.empty_trash()
+    flash("Corbeille vidée.", "success")
+    return redirect(url_for("trash_page"))
+
+
+# --------------------------------------------------------- reste à faire
+
+@app.route("/projects/<int:project_id>/reste", methods=["POST"])
+def set_remaining(project_id):
+    """Enregistre (ou efface) le reste à faire déclaré d'un projet."""
+    if not db.get_project(project_id):
+        abort(404)
+    raw = (request.form.get("remaining_days") or "").strip()
+    try:
+        value = None if raw == "" else req_float(request.form, "remaining_days",
+                                                 "Reste à faire", 0, 3650)
+    except FormError as exc:
+        flash(str(exc), "error")
+    else:
+        db.set_project_remaining(project_id, value)
+        flash("Reste à faire effacé." if value is None else "Reste à faire mis à jour.",
+              "success")
+    return redirect(url_for("project_detail", project_id=project_id))
+
+
+# ------------------------------------------------------------- recherche
+
+@app.route("/api/recherche")
+def api_search():
+    """Index léger pour la palette de commandes (touche « / »).
+
+    Renvoyé en JSON plutôt que rendu dans chaque page : la liste des projets
+    n'a pas à être recopiée dans le HTML de toutes les vues pour qu'une
+    recherche existe.
+    """
+    projects = db.list_projects()
+    return {
+        "projets": [{"id": p["id"], "nom": p["name"], "client": p["client"] or "",
+                     "statut": STATUS_LABELS.get(p["status"], p["status"])}
+                    for p in projects],
+        "clients": [{"id": c["id"], "nom": c["name"]} for c in db.list_client_records()],
+        "pages": [{"nom": label, "url": url_for(endpoint)}
+                  for label, endpoint in NAV_PAGES],
+    }
 
 
 # ------------------------------------------------------------- réglages
@@ -1387,6 +1531,8 @@ def settings_page():
                            req_float(request.form, "annual_fixed_costs", "Charges fixes annuelles", 0, default=0))
             db.set_setting("billable_days_per_year",
                            req_float(request.form, "billable_days_per_year", "Jours facturables par an", 1, 366, default=180))
+            theme = (request.form.get("theme") or "auto").strip()
+            db.set_setting("theme", theme if theme in ("auto", "light", "dark") else "auto")
             db.set_setting("overrun_weeks",
                            req_float(request.form, "overrun_weeks", "Prolongation maximale", 0, 52, default=4))
         except FormError as exc:
@@ -1466,6 +1612,19 @@ def backup():
 
 if __name__ == "__main__":
     db.init_db()
+
+    # Entretien au démarrage, dans cet ordre : purger d'abord, sauvegarder
+    # ensuite, pour ne pas figer dans la copie du jour des lignes de
+    # corbeille qui viennent d'expirer. Les deux sont enveloppés : un disque
+    # plein ou un dossier en lecture seule ne doit pas empêcher l'app de
+    # démarrer, seulement priver de la sauvegarde du jour.
+    try:
+        db.purge_trash()
+        chemin = db.auto_backup()
+        print(f"Sauvegarde du jour : {chemin}")
+    except Exception as exc:  # pragma: no cover — dépend du système de fichiers
+        print(f"Sauvegarde automatique impossible ({exc}). L'app démarre quand même.")
+
     port = int(os.environ.get("TIMING_PORT", 5062))
     print(f"Timing disponible sur http://127.0.0.1:{port}")
     # debug=False : le débogueur Werkzeug permet d'exécuter du Python

@@ -41,6 +41,9 @@
   <div class="card-title-row">
     <h3>Cadence</h3>
     <span class="stat-badge status-{{ stats.pace_status }}"><span class="dot"></span>{{ pace_label[stats.pace_status] }}</span>
+    <span class="faint">
+      {% if stats.pace_basis == 'declared' %}d'après le reste à faire déclaré{% else %}d'après le temps écoulé{% endif %}
+    </span>
   </div>
 
   <div class="progress-track progress-lg">
@@ -51,6 +54,53 @@
     <span>{{ project.start_date }}</span>
     <span>budget consommé {{ stats.pct_consumed }}% · temps écoulé {{ stats.pct_time_elapsed }}%</span>
     <span>{{ stats.planned_end_date }}</span>
+  </div>
+
+  {# Reste à faire déclaré. La cadence ci-dessus suppose une consommation
+     linéaire ; un projet à 90 % de budget dont il reste trois jours de
+     travail et un projet à 90 % dont il reste trois semaines s'affichaient
+     exactement pareil. #}
+  <div class="eac">
+    <form method="post" action="{{ url_for('set_remaining', project_id=project.id) }}" class="eac-row">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="remaining_days">Reste à faire</label>
+      <input type="number" step="0.25" min="0" id="remaining_days" name="remaining_days"
+             class="mini-input eac-input"
+             value="{{ stats.remaining_declared if stats.remaining_declared is not none else '' }}"
+             placeholder="j">
+      <span class="faint">jours</span>
+      <button type="submit" class="btn btn-ghost btn-sm">Enregistrer</button>
+      {% if stats.remaining_declared is not none %}
+        <span class="faint">
+          mis à jour il y a {{ stats.remaining_age_days }} j
+        </span>
+        {% if not stats.remaining_fresh %}
+        <span class="eac-stale">estimation périmée, cadence au prorata</span>
+        {% endif %}
+      {% endif %}
+    </form>
+
+    {% if stats.eac_days is not none %}
+    <p class="faint" style="margin: 0;">
+      Terminaison prévue à <strong class="mono">{{ stats.eac_days }} j</strong>
+      pour {{ stats.total_days_sold }} j vendus, soit
+      {% if stats.eac_drift_days > 0 %}
+        <span class="eac-drift is-over">{{ '%+.2f'|format(stats.eac_drift_days) }} j
+        ({{ '%+.1f'|format(stats.eac_drift_pct) }}%)</span> de dépassement annoncé.
+      {% elif stats.eac_drift_days < 0 %}
+        <span class="eac-drift is-under">{{ '%+.2f'|format(stats.eac_drift_days) }} j</span>
+        de marge annoncée.
+      {% else %}
+        pile le budget.
+      {% endif %}
+    </p>
+    {% else %}
+    <p class="faint" style="margin: 0;">
+      Sans reste à faire déclaré, la cadence compare le budget consommé au
+      temps écoulé. C'est un prorata : il suppose que le travail avance au
+      rythme du calendrier.
+    </p>
+    {% endif %}
   </div>
 
   <div class="stat-strip">
@@ -175,6 +225,15 @@
     <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.invoiced) }}{{ currency }}</div><div class="stat-label">Facturé</div></div>
     <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.paid) }}{{ currency }}</div><div class="stat-label">Encaissé</div></div>
     <div class="stat"><div class="stat-num">{{ '%.0f'|format(stats.to_invoice) }}{{ currency }}</div><div class="stat-label">Reste à facturer</div></div>
+    {% if stats.wip %}
+    <div class="stat">
+      <div class="stat-num {{ 'wip-neg' if stats.wip.wip < 0 }}">{{ '%.0f'|format(stats.wip.wip) }}{{ currency }}</div>
+      <div class="stat-label">Produit non facturé</div>
+      <div class="faint">
+        {% if stats.wip.wip < 0 %}facturé d'avance{% else %}{{ stats.days_spent }} j produits au TJM vendu, moins le facturé{% endif %}
+      </div>
+    </div>
+    {% endif %}
   </div>
 
   {% if stats.real_margin is none %}

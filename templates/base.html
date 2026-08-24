@@ -1,12 +1,13 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-theme="{{ theme }}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}Timing{% endblock %}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+{# Polices auto-hébergées. En CDN Google, une app locale ouverte sans réseau
+   (train, avion, coupure) perdait ses trois familles d'un coup et se
+   rabattait sur les polices système, avec des largeurs de colonnes qui ne
+   correspondaient plus. 196 Ko de woff2 latin réglent la question. #}
 <meta name="theme-color" content="#2E8577">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Timing">
@@ -59,6 +60,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 18c2-4 5-6 9-6s7 2 9 6"/><circle cx="12" cy="6" r="2.6"/></svg>
         Absences
       </a>
+      <a href="{{ url_for('trash_page') }}" class="{{ 'is-active' if request.endpoint == 'trash_page' }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/></svg>
+        Corbeille
+      </a>
       <a href="{{ url_for('settings_page') }}" class="{{ 'is-active' if request.endpoint == 'settings_page' }}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z"/></svg>
         Réglages
@@ -80,6 +85,69 @@
     {% block content %}{% endblock %}
   </main>
 </div>
+
+{# Barre d'annulation. Le lien vit ici, pas dans un message flash : un flash
+   est du texte échappé, et y coller du HTML aurait ouvert la porte à
+   l'injection par un nom de projet. #}
+{% if undo %}
+<div class="undo-bar" id="undo-bar">
+  <span>{{ undo.label }}</span>
+  <form method="post" action="{{ url_for('restore_trash', trash_id=undo.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ request.full_path }}">
+    <button type="submit" class="undo-action">Annuler</button>
+  </form>
+  <a href="{{ url_for('trash_page') }}" class="undo-link">corbeille</a>
+</div>
+{% endif %}
+
+{# Navigation basse, mobile uniquement : sous 620 px, les onze liens du rail
+   remplissaient deux lignes avant même le contenu. Ne restent ici que les
+   quatre gestes quotidiens ; le reste passe par la palette. #}
+<nav class="tabbar">
+  <a href="{{ url_for('dashboard') }}" class="{{ 'is-active' if request.endpoint == 'dashboard' }}">Aujourd'hui</a>
+  <a href="{{ url_for('day_view') }}" class="{{ 'is-active' if request.endpoint == 'day_view' }}">Jour</a>
+  <a href="{{ url_for('week') }}" class="{{ 'is-active' if request.endpoint == 'week' }}">Semaine</a>
+  <a href="{{ url_for('planning') }}" class="{{ 'is-active' if request.endpoint == 'planning' }}">Planning</a>
+  <button type="button" class="tabbar-more" data-open-palette>Aller à</button>
+</nav>
+
+<div class="palette" id="palette" hidden>
+  <div class="palette-box" role="dialog" aria-modal="true" aria-label="Aller à">
+    <input type="text" id="palette-input" placeholder="Projet, client ou page…" autocomplete="off">
+    <ul id="palette-results" class="palette-results"></ul>
+    <p class="palette-hint faint">↑ ↓ pour naviguer · Entrée pour ouvrir · Échap pour fermer</p>
+  </div>
+</div>
+
+<div class="palette" id="shortcuts" hidden>
+  <div class="palette-box" role="dialog" aria-modal="true" aria-label="Raccourcis clavier">
+    <h3>Raccourcis</h3>
+    <ul class="shortcut-list">
+      <li><kbd>/</kbd> chercher un projet, un client ou une page</li>
+      <li><kbd>g</kbd> puis <kbd>a</kbd> aujourd'hui</li>
+      <li><kbd>g</kbd> puis <kbd>j</kbd> jour</li>
+      <li><kbd>g</kbd> puis <kbd>s</kbd> semaine</li>
+      <li><kbd>g</kbd> puis <kbd>p</kbd> planning</li>
+      <li><kbd>g</kbd> puis <kbd>f</kbd> facturation</li>
+      <li><kbd>g</kbd> puis <kbd>c</kbd> clients</li>
+      <li><kbd>n</kbd> nouveau projet</li>
+      <li><kbd>?</kbd> cette aide</li>
+    </ul>
+    <p class="palette-hint faint">Échap pour fermer</p>
+  </div>
+</div>
+
+<script>
+  // Cibles de navigation au clavier, construites côté serveur pour que
+  // l'ajout d'une page ne demande pas de retoucher le JavaScript.
+  window.TIMING_ROUTES = {
+    a: "{{ url_for('dashboard') }}", j: "{{ url_for('day_view') }}",
+    s: "{{ url_for('week') }}", p: "{{ url_for('planning') }}",
+    f: "{{ url_for('billing') }}", c: "{{ url_for('clients') }}",
+    r: "{{ url_for('projects_list') }}", n: "{{ url_for('new_project') }}"
+  };
+</script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

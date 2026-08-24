@@ -215,6 +215,120 @@ def days_remaining(project, agg):
     return round(total_days_sold(project) - days_spent(agg), 2)
 
 
+def field(row, key, default=None):
+    """Lecture tolérante d'un champ, dict ou sqlite3.Row.
+
+    Un dict lève KeyError, un sqlite3.Row lève IndexError. Les colonnes
+    ajoutées par migration n'existent pas dans les projets fabriqués à la
+    main par les tests ni dans un scénario simulé : sans ce garde-fou, la
+    moindre colonne nouvelle faisait exploser tout le module de calcul là où
+    elle aurait dû être simplement absente.
+    """
+    try:
+        value = row[key]
+    except (KeyError, IndexError):
+        return default
+    return default if value is None else value
+
+
+# --------------------------------------------------------- reste à faire
+
+# Au-delà de ce délai, une estimation de reste à faire n'est plus considérée
+# comme fraîche : elle reste affichée, avec sa date, mais cesse de piloter
+# la cadence. Une estimation de deux mois pesant autant qu'une estimation du
+# jour, c'est pire que pas d'estimation du tout.
+REMAINING_FRESH_DAYS = 21
+
+
+def declared_remaining(project):
+    """Reste à faire déclaré, en jours. None si non renseigné."""
+    value = field(project, "remaining_days")
+    if value is None:
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def remaining_age_days(project, today=None):
+    """Ancienneté de l'estimation, en jours. None si jamais renseignée."""
+    stamp = field(project, "remaining_updated_at")
+    if not stamp:
+        return None
+    try:
+        updated = datetime.fromisoformat(str(stamp)).date()
+    except ValueError:
+        return None
+    return ((today or date.today()) - updated).days
+
+
+def remaining_is_fresh(project, today=None):
+    age = remaining_age_days(project, today)
+    return age is not None and age <= REMAINING_FRESH_DAYS
+
+
+def estimate_at_completion(project, agg):
+    """Jours totaux prévus à terminaison : consommé + reste déclaré.
+
+    C'est le chiffre que pilote un cabinet, là où le prorata temporel se
+    contente de supposer une consommation linéaire.
+    """
+    remaining = declared_remaining(project)
+    if remaining is None:
+        return None
+    return round(days_spent(agg) + remaining, 2)
+
+
+def eac_drift(project, agg):
+    """Écart entre la terminaison prévue et le budget vendu, en jours.
+
+    Positif = dépassement annoncé. C'est la seule alerte qui peut sonner
+    AVANT que le budget soit consommé : déclarer huit jours de reste sur un
+    projet à qui il en reste trois est un dépassement acquis, même si le
+    compteur affiche encore 60 % de budget disponible.
+    """
+    eac = estimate_at_completion(project, agg)
+    if eac is None:
+        return None
+    return round(eac - total_days_sold(project), 2)
+
+
+def eac_drift_pct(project, agg):
+    drift = eac_drift(project, agg)
+    total = total_days_sold(project)
+    if drift is None or total <= 0:
+        return None
+    return round(drift / total * 100, 1)
+
+
+def pace_basis(project, today=None):
+    """« declared » si la cadence s'appuie sur le reste à faire déclaré,
+    « elapsed » si elle retombe sur le prorata temporel."""
+    if declared_remaining(project) is not None and remaining_is_fresh(project, today):
+        return "declared"
+    return "elapsed"
+
+
+def pace_delta(project, agg, today=None):
+    """Écart de cadence, en points.
+
+    Deux bases possibles, la meilleure disponible :
+
+    - reste à faire déclaré et frais : l'écart est le dépassement annoncé en
+      % du budget vendu. C'est ce que fait un pilotage de mission, et c'est
+      insensible au rythme irrégulier ;
+    - sinon : budget consommé moins temps écoulé, le prorata d'origine, qui
+      suppose une consommation linéaire.
+    """
+    if pace_basis(project, today) == "declared":
+        drift = eac_drift_pct(project, agg)
+        if drift is not None:
+            return drift
+    return pct_consumed(project, agg) - pct_time_elapsed(project, today)
+
+
 def pace_status(project, agg, today=None):
     """Cadence : compare le budget consommé au temps écoulé.
 
@@ -228,10 +342,13 @@ def pace_status(project, agg, today=None):
         -10 .. 10        dans les clous
         10 .. 25         tendu
         > 25             en retard
+
+    Le delta vient du reste à faire déclaré quand il est frais, du prorata
+    temporel sinon — voir pace_delta().
     """
     if (agg.get("entries_count") or 0) == 0:
         return "not_started"
-    delta = pct_consumed(project, agg) - pct_time_elapsed(project, today)
+    delta = pace_delta(project, agg, today)
     if delta < -10:
         return "ahead"
     if delta <= 10:
@@ -477,6 +594,21 @@ def break_even(settings, days_billed_this_year):
 
 # --------------------------------------------------------- stats projet
 
+def work_in_progress(project, agg, invoiced=None):
+    """Travail produit et pas encore facturé, valorisé au TJM théorique.
+
+    Un indépendant qui facture par jalons produit avant d'encaisser. Ni le
+    temps passé ni le CA facturé ne montrent seuls cet écart : c'est
+    pourtant lui qui dit combien d'argent dort dans du travail déjà fait.
+
+    Négatif = facturé d'avance, ce qui est une information tout aussi utile
+    et ne doit donc pas être écrasé à zéro.
+    """
+    produced = round(days_spent(agg) * theoretical_day_rate(project), 2)
+    billed = round((invoiced or {}).get("invoiced", 0) or 0, 2)
+    return {"produced": produced, "invoiced": billed, "wip": round(produced - billed, 2)}
+
+
 def project_stats(project, agg, settings, costs=0.0, invoiced=None, today=None,
                   absences=None):
     """Toutes les statistiques d'un projet, en une passe.
@@ -517,6 +649,14 @@ def project_stats(project, agg, settings, costs=0.0, invoiced=None, today=None,
                                                        today, absences),
         "index_reliable": reliable,
         "pace_status": pace_status(project, agg, today),
+        "pace_basis": pace_basis(project, today),
+        "pace_delta": round(pace_delta(project, agg, today), 1),
+        "remaining_declared": declared_remaining(project),
+        "remaining_age_days": remaining_age_days(project, today),
+        "remaining_fresh": remaining_is_fresh(project, today),
+        "eac_days": estimate_at_completion(project, agg),
+        "eac_drift_days": eac_drift(project, agg),
+        "eac_drift_pct": eac_drift_pct(project, agg),
         "planned_end_date": planned_end_date(project),
         "projected_end_date": projected_end_date(project, agg, settings, today, absences),
         "entries_count": agg.get("entries_count") or 0,
@@ -533,6 +673,7 @@ def project_stats(project, agg, settings, costs=0.0, invoiced=None, today=None,
         stats["paid"] = round(invoiced.get("paid", 0), 2)
         stats["milestones_total"] = round(invoiced.get("total", 0), 2)
         stats["to_invoice"] = round(project["price_total"] - invoiced.get("invoiced", 0), 2)
+        stats["wip"] = work_in_progress(project, agg, invoiced)
     return stats
 
 
@@ -727,6 +868,77 @@ def daily_capacity(projects, window_start, window_days, include_provisional,
     return days
 
 
+SCENARIO_ID = -1
+SCENARIO_CLIENT = "Simulation"
+
+
+def scenario_project(name, start_date, days_per_week, duration_value,
+                     duration_unit="weeks", weekdays=None):
+    """Projet FICTIF, jamais écrit en base, injecté dans les calculs de charge.
+
+    La page Planning répondait à « puis-je accepter un projet de plus ? » à
+    condition de créer d'abord le projet, donc de polluer la base, les
+    exports et le carnet de commandes pour répondre à une question qui
+    n'engage à rien. Le scénario vit le temps d'une URL.
+
+    Statut « confirmed » à dessein : on simule un projet SIGNÉ, sinon la
+    simulation disparaîtrait au premier décochage des provisoires — c'est-à-
+    dire précisément quand on veut comparer au socle certain.
+    """
+    return {
+        "id": SCENARIO_ID,
+        "name": name or "Projet simulé",
+        "client": SCENARIO_CLIENT,
+        "client_id": None,
+        "status": "confirmed",
+        "days_per_week": float(days_per_week),
+        "duration_value": float(duration_value),
+        "duration_unit": duration_unit if duration_unit in ("weeks", "months") else "weeks",
+        "day_rate": None,
+        "price_total": 0.0,
+        "hours_per_day": None,
+        "start_date": start_date,
+        "weekdays": weekdays or "",
+        "color": "#6B4FA8",
+        "notes": "",
+        "archived": 0,
+        "remaining_days": None,
+        "remaining_updated_at": None,
+        "created_at": "",
+        "updated_at": None,
+        "is_scenario": True,
+    }
+
+
+def scenario_impact(before, after):
+    """Différence entre deux grilles d'allocation, avant et après scénario.
+
+    Un planning simulé qui affiche seulement l'état final oblige à comparer
+    deux écrans de tête. Ce qui décide, c'est le delta : combien de jours
+    libres il reste, et combien de semaines passent en surcharge.
+    """
+    weeks = []
+    over_before = sum(1 for t in before["totals"] if t["over"])
+    over_after = sum(1 for t in after["totals"] if t["over"])
+    for i, col in enumerate(after["columns"]):
+        b, a = before["totals"][i], after["totals"][i]
+        weeks.append({
+            "label": col["label"],
+            "free_before": b["free"], "free_after": a["free"],
+            "booked_after": a["booked"], "capacity": a["capacity"],
+            "pct_after": a["pct"], "over": a["over"], "newly_over": a["over"] and not b["over"],
+        })
+    return {
+        "weeks": weeks,
+        "free_before": round(sum(max(0, t["free"]) for t in before["totals"]), 2),
+        "free_after": round(sum(max(0, t["free"]) for t in after["totals"]), 2),
+        "over_before": over_before,
+        "over_after": over_after,
+        "newly_over": sum(1 for w in weeks if w["newly_over"]),
+        "feasible": over_after == over_before,
+    }
+
+
 def capacity_scale(capacity, minimum=120):
     """Hauteur de référence des colonnes de la carte de charge.
 
@@ -797,6 +1009,31 @@ def build_alerts(project_rows, capacity, milestones, missing, today=None):
 
     for row in project_rows:
         p, stats = row["project"], row["stats"]
+        if p["status"] not in LIVE_STATUSES:
+            continue
+        # Dépassement ANNONCÉ : le reste à faire déclaré fait sortir le
+        # projet de son budget, même si le compteur de consommation est
+        # encore rassurant. C'est la seule alerte qui arrive avant les
+        # faits, donc la seule qui laisse encore le temps de renégocier.
+        drift = stats.get("eac_drift_days")
+        if drift is not None and stats.get("remaining_fresh") and drift > 0.5:
+            alerts.append({
+                "level": "danger" if (stats.get("eac_drift_pct") or 0) > 10 else "warning",
+                "text": (f"{p['name']} : le reste à faire annoncé dépasse le budget de "
+                         f"{drift:.1f} j."),
+                "url_name": "project_detail", "url_arg": p["id"],
+            })
+        elif (stats.get("remaining_declared") is not None
+              and not stats.get("remaining_fresh")
+              and (stats.get("remaining_age_days") or 0) > REMAINING_FRESH_DAYS):
+            alerts.append({
+                "level": "info",
+                "text": (f"{p['name']} : le reste à faire date de "
+                         f"{stats['remaining_age_days']} jours, la cadence est repassée "
+                         f"au prorata."),
+                "url_name": "project_detail", "url_arg": p["id"],
+            })
+
         if p["status"] != "confirmed":
             continue
         end = stats["planned_end_date"]

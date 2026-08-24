@@ -13,9 +13,10 @@ Deux principes qui expliquent la forme du fichier :
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 try:
@@ -62,6 +63,10 @@ DEFAULT_SETTINGS = {
     # temps — sans quoi aucune "marge" affichée n'est une vraie marge.
     "annual_fixed_costs": "0",
     "billable_days_per_year": "180",
+    # Thème d'affichage : auto (suit le système), light, dark. Stocké en
+    # base plutôt qu'en localStorage : l'app est mono-utilisateur et locale,
+    # donc le réglage doit suivre la base, pas le navigateur.
+    "theme": "auto",
 }
 
 PROJECT_COLORS = [
@@ -104,7 +109,25 @@ MIGRATIONS = [
     ("costs", "billable", "INTEGER NOT NULL DEFAULT 0"),
     ("projects", "weekdays", "TEXT"),
     ("projects", "client_id", "INTEGER REFERENCES clients(id) ON DELETE SET NULL"),
+    ("projects", "remaining_days", "REAL"),
+    ("projects", "remaining_updated_at", "TEXT"),
 ]
+
+# Durée de conservation d'une ligne en corbeille. Au-delà, la purge du
+# démarrage l'efface : une corbeille qui ne se vide jamais finit par peser
+# plus lourd que les données vivantes.
+TRASH_RETENTION_DAYS = 30
+
+# Types restaurables. La clé est le `kind` stocké, la valeur la table cible.
+# Une table absente de ce dictionnaire ne peut pas être restaurée : mieux
+# vaut refuser que réinsérer une ligne dans une table dont on ne connaît
+# pas les contraintes.
+TRASH_TABLES = {
+    "entry": "entries",
+    "milestone": "milestones",
+    "cost": "costs",
+    "absence": "absences",
+}
 
 
 def now_iso() -> str:
@@ -759,10 +782,28 @@ def update_entry(entry_id, entry_date, percent, hours, task_id=None, note=""):
 
 
 def delete_entry(entry_id):
+    """Supprime une saisie, après copie en corbeille.
+
+    Une saisie effacée par erreur (mauvaise ligne dans la grille hebdo) était
+    irrécupérable : ni confirmation, ni retour en arrière.
+    """
     conn = get_db()
+    row = conn.execute(
+        "SELECT e.*, p.name AS _project_name FROM entries e "
+        "LEFT JOIN projects p ON p.id = e.project_id WHERE e.id = ?", (entry_id,)
+    ).fetchone()
+    trash_id = None
+    if row is not None:
+        label = f"Saisie du {row['entry_date']} — {row['_project_name'] or 'projet supprimé'}"
+        payload = {k: row[k] for k in row.keys() if not k.startswith("_")}
+        trash_id = conn.execute(
+            "INSERT INTO trash (kind, label, payload, deleted_at) VALUES (?,?,?,?)",
+            ("entry", label, json.dumps(payload, ensure_ascii=False), now_iso()),
+        ).lastrowid
     conn.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
     conn.commit()
     release_db(conn)
+    return trash_id
 
 
 def entries_aggregate_by_project():
@@ -1061,9 +1102,12 @@ def create_absence(label, kind, start_date, end_date):
 
 def delete_absence(absence_id):
     conn = get_db()
+    row = conn.execute("SELECT * FROM absences WHERE id = ?", (absence_id,)).fetchone()
+    trash_id = trash_put(conn, "absence", f"Absence « {row['label']} »", row) if row else None
     conn.execute("DELETE FROM absences WHERE id = ?", (absence_id,))
     conn.commit()
     release_db(conn)
+    return trash_id
 
 
 # --------------------------------------------------------------- facturation
@@ -1147,9 +1191,12 @@ def set_milestone_status(milestone_id, status, invoice_ref=None, dated=None):
 
 def delete_milestone(milestone_id):
     conn = get_db()
+    row = conn.execute("SELECT * FROM milestones WHERE id = ?", (milestone_id,)).fetchone()
+    trash_id = trash_put(conn, "milestone", f"Jalon « {row['label']} »", row) if row else None
     conn.execute("DELETE FROM milestones WHERE id = ?", (milestone_id,))
     conn.commit()
     release_db(conn)
+    return trash_id
 
 
 def get_milestone(milestone_id):
@@ -1238,9 +1285,12 @@ def create_cost(project_id, label, amount, cost_date, billable=False):
 
 def delete_cost(cost_id):
     conn = get_db()
+    row = conn.execute("SELECT * FROM costs WHERE id = ?", (cost_id,)).fetchone()
+    trash_id = trash_put(conn, "cost", f"Coût « {row['label']} »", row) if row else None
     conn.execute("DELETE FROM costs WHERE id = ?", (cost_id,))
     conn.commit()
     release_db(conn)
+    return trash_id
 
 
 def get_cost_project(cost_id):
@@ -1457,3 +1507,176 @@ def export_to_invoice():
     ).fetchall()
     release_db(conn)
     return [dict(r) for r in rows]
+
+
+# ------------------------------------------------------------- reste à faire
+
+def set_project_remaining(project_id, days):
+    """Enregistre le reste à faire déclaré d'un projet (None = efface).
+
+    Stocké à part du budget vendu : c'est une estimation qui bouge, pas une
+    donnée contractuelle. La date de mise à jour l'accompagne, faute de quoi
+    une estimation vieille de deux mois pèserait autant qu'une estimation du
+    jour dans les alertes.
+    """
+    conn = get_db()
+    conn.execute(
+        "UPDATE projects SET remaining_days = ?, remaining_updated_at = ?, updated_at = ? "
+        "WHERE id = ?",
+        (days, now_iso() if days is not None else None, now_iso(), project_id),
+    )
+    conn.commit()
+    release_db(conn)
+
+
+# ------------------------------------------------------------- corbeille
+
+def _row_to_payload(row):
+    return {key: row[key] for key in row.keys()}
+
+
+def trash_put(conn, kind, label, row):
+    """Recopie une ligne en corbeille. Appelé AVANT le DELETE, sur la même
+    connexion, pour qu'une suppression et son archivage soient atomiques :
+    archiver dans une transaction séparée laissait la porte ouverte à une
+    ligne effacée dont la copie n'existait pas.
+    """
+    if kind not in TRASH_TABLES:
+        raise ValueError(f"Type non restaurable : {kind!r}")
+    cur = conn.execute(
+        "INSERT INTO trash (kind, label, payload, deleted_at) VALUES (?,?,?,?)",
+        (kind, label, json.dumps(_row_to_payload(row), ensure_ascii=False), now_iso()),
+    )
+    return cur.lastrowid
+
+
+def list_trash(limit=100):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM trash ORDER BY deleted_at DESC, id DESC LIMIT ?", (limit,)
+    ).fetchall()
+    release_db(conn)
+    return [{"id": r["id"], "kind": r["kind"], "label": r["label"],
+             "deleted_at": r["deleted_at"],
+             "payload": json.loads(r["payload"])} for r in rows]
+
+
+def get_trash(trash_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM trash WHERE id = ?", (trash_id,)).fetchone()
+    release_db(conn)
+    return row
+
+
+def restore_trash(trash_id):
+    """Réinsère une ligne supprimée, avec son id d'origine si celui-ci est
+    resté libre.
+
+    Réinsérer sans id aurait cassé tout ce qui pointait vers l'ancien
+    (rien aujourd'hui, mais la règle vaut d'être tenue), et le forcer alors
+    qu'il est repris depuis aurait levé une contrainte d'unicité en pleine
+    restauration. Le projet parent peut aussi avoir disparu entre-temps :
+    la restauration échoue alors proprement au lieu de créer un orphelin.
+    """
+    conn = get_db()
+    row = conn.execute("SELECT * FROM trash WHERE id = ?", (trash_id,)).fetchone()
+    if row is None:
+        release_db(conn)
+        return None, "Cet élément n'est plus dans la corbeille."
+
+    kind = row["kind"]
+    table = TRASH_TABLES.get(kind)
+    if table is None:
+        release_db(conn)
+        return None, "Cet élément n'est pas restaurable."
+
+    payload = json.loads(row["payload"])
+    columns = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+    data = {k: v for k, v in payload.items() if k in columns}
+
+    parent = data.get("project_id")
+    if parent is not None:
+        exists = conn.execute("SELECT 1 FROM projects WHERE id = ?", (parent,)).fetchone()
+        if exists is None:
+            release_db(conn)
+            return None, "Le projet d'origine n'existe plus."
+
+    taken = conn.execute(f"SELECT 1 FROM {table} WHERE id = ?", (data.get("id"),)).fetchone()
+    if taken is not None:
+        data.pop("id", None)
+
+    cols = ", ".join(data.keys())
+    marks = ", ".join("?" for _ in data)
+    cur = conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})", tuple(data.values()))
+    new_id = cur.lastrowid
+    conn.execute("DELETE FROM trash WHERE id = ?", (trash_id,))
+    conn.commit()
+    release_db(conn)
+    return new_id, None
+
+
+def empty_trash():
+    conn = get_db()
+    conn.execute("DELETE FROM trash")
+    conn.commit()
+    release_db(conn)
+
+
+def purge_trash(retention_days=TRASH_RETENTION_DAYS):
+    """Efface les lignes de corbeille plus anciennes que la rétention.
+
+    Comparaison inclusive : les horodatages sont à la seconde près, donc
+    avec une borne stricte une ligne supprimée dans la même seconde que la
+    purge y échappait — invisible avec trente jours de rétention, net avec
+    zéro.
+    """
+    cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat(timespec="seconds")
+    conn = get_db()
+    cur = conn.execute("DELETE FROM trash WHERE deleted_at <= ?", (cutoff,))
+    conn.commit()
+    release_db(conn)
+    return cur.rowcount
+
+
+# ------------------------------------------------------------- sauvegarde
+
+def backup_to(path):
+    """Copie cohérente de la base vers `path`, via sqlite3.backup().
+
+    En mode WAL, copier le seul fichier principal donne une sauvegarde en
+    retard sur la base réelle : les écritures récentes vivent encore dans le
+    journal.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = get_db()
+    target = sqlite3.connect(str(path))
+    try:
+        conn.backup(target)
+    finally:
+        target.close()
+        release_db(conn)
+    return path
+
+
+def auto_backup(directory=None, keep=7):
+    """Sauvegarde datée au démarrage, avec rotation.
+
+    Une sauvegarde manuelle depuis les Réglages ne protège que les gens qui
+    y pensent. Une copie par jour d'utilisation, conservée `keep` jours,
+    couvre le cas réel : la fausse manipulation qu'on ne remarque que le
+    lendemain. Une seule par jour, donc relancer l'app dix fois n'écrase pas
+    dix fois l'état du matin.
+    """
+    directory = Path(directory or DB_PATH.parent / "backups")
+    stamp = datetime.now().date().isoformat()
+    target = directory / f"timing-{stamp}.sqlite3"
+    if not target.exists():
+        backup_to(target)
+    existing = sorted(directory.glob("timing-*.sqlite3"))
+    for old in existing[:-keep] if keep > 0 else []:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return target

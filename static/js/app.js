@@ -80,10 +80,32 @@
     box.appendChild(list);
   }
 
-  document.querySelectorAll(".day-cell, .cap-col").forEach((cell) => {
+  // Le détail d'une journée n'existait qu'au survol et au clic : sans
+  // tabindex ni rôle, la carte de charge était entièrement hors d'atteinte
+  // au clavier, et invisible pour un lecteur d'écran. Les flèches gauche et
+  // droite passent d'un jour à l'autre, comme dans la grille hebdo.
+  const cells = Array.from(document.querySelectorAll(".day-cell, .cap-col"));
+  cells.forEach((cell, i) => {
     const handler = () => renderDetail(cell);
     cell.addEventListener("mouseenter", handler);
     cell.addEventListener("click", handler);
+    cell.addEventListener("focus", handler);
+
+    if (!cell.hasAttribute("tabindex")) cell.setAttribute("tabindex", "0");
+    if (!cell.hasAttribute("role")) cell.setAttribute("role", "button");
+    if (!cell.hasAttribute("aria-label")) {
+      const off = cell.dataset.off;
+      cell.setAttribute("aria-label", cell.dataset.date +
+        (off ? " — non travaillé (" + off + ")" : " — " + (cell.dataset.pct || 0) + "% de charge"));
+    }
+
+    cell.addEventListener("keydown", (e) => {
+      let target = null;
+      if (e.key === "ArrowRight") target = cells[i + 1];
+      else if (e.key === "ArrowLeft") target = cells[i - 1];
+      else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handler(); return; }
+      if (target) { e.preventDefault(); target.focus(); }
+    });
   });
 })();
 
@@ -124,5 +146,151 @@
       field.value = value === "0" ? "" : value;
       field.focus();
     });
+  });
+})();
+
+
+(function undoBar() {
+  // La barre d'annulation disparaît au bout de dix secondes : passé ce
+  // délai, elle n'annule plus le geste qu'on vient de faire, elle occupe
+  // seulement le bas de l'écran. La corbeille prend le relais.
+  const bar = document.getElementById("undo-bar");
+  if (!bar) return;
+  setTimeout(() => bar.classList.add("is-gone"), 10000);
+})();
+
+(function commandPalette() {
+  // Aller à un projet demandait de passer par Projets puis de chercher. Une
+  // palette évite les deux clics, et sert aussi de menu complet sur mobile,
+  // où le rail ne tient plus.
+  const overlay = document.getElementById("palette");
+  const input = document.getElementById("palette-input");
+  const list = document.getElementById("palette-results");
+  const help = document.getElementById("shortcuts");
+  if (!overlay || !input || !list) return;
+
+  let index = null;   // chargé à la première ouverture, pas au chargement de
+                      // la page : la palette ne sert pas à chaque visite.
+  let matches = [];
+  let active = 0;
+
+  function close(el) { el.hidden = true; }
+
+  function openHelp() {
+    if (help) { help.hidden = false; }
+  }
+
+  async function load() {
+    if (index) return index;
+    try {
+      const res = await fetch("/api/recherche", { headers: { "Accept": "application/json" } });
+      index = await res.json();
+    } catch (e) {
+      index = { projets: [], clients: [], pages: [] };
+    }
+    return index;
+  }
+
+  function normalise(text) {
+    // Sans cette normalisation, chercher « facturation » ne trouvait pas
+    // « Facturation », et « prevision » ne trouvait pas « prévisionnel ».
+    return (text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  }
+
+  function build(query) {
+    const q = normalise(query);
+    const out = [];
+    (index.pages || []).forEach((p) => {
+      if (!q || normalise(p.nom).includes(q)) out.push({ label: p.nom, meta: "page", url: p.url });
+    });
+    (index.projets || []).forEach((p) => {
+      if (!q || normalise(p.nom + " " + p.client).includes(q)) {
+        out.push({ label: p.nom, meta: p.client || p.statut, url: "/projects/" + p.id });
+      }
+    });
+    (index.clients || []).forEach((c) => {
+      if (q && normalise(c.nom).includes(q)) {
+        out.push({ label: c.nom, meta: "client", url: "/clients/" + c.id });
+      }
+    });
+    return out.slice(0, 20);
+  }
+
+  function render() {
+    list.textContent = "";
+    matches.forEach((m, i) => {
+      // createElement + textContent, jamais innerHTML : les noms de projets
+      // et de clients viennent de la saisie utilisateur.
+      const li = document.createElement("li");
+      if (i === active) li.className = "is-active";
+      const name = document.createElement("span");
+      name.textContent = m.label;
+      const meta = document.createElement("span");
+      meta.className = "pal-meta";
+      meta.textContent = m.meta || "";
+      li.appendChild(name);
+      li.appendChild(meta);
+      li.addEventListener("click", () => { window.location.href = m.url; });
+      list.appendChild(li);
+    });
+  }
+
+  async function open() {
+    overlay.hidden = false;
+    input.value = "";
+    await load();
+    matches = build("");
+    active = 0;
+    render();
+    input.focus();
+  }
+
+  input.addEventListener("input", () => {
+    matches = build(input.value);
+    active = 0;
+    render();
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); active = Math.min(active + 1, matches.length - 1); render(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); active = Math.max(active - 1, 0); render(); }
+    else if (e.key === "Enter" && matches[active]) { e.preventDefault(); window.location.href = matches[active].url; }
+  });
+
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(overlay); });
+  if (help) help.addEventListener("click", (e) => { if (e.target === help) close(help); });
+
+  document.querySelectorAll("[data-open-palette]").forEach((b) => {
+    b.addEventListener("click", open);
+  });
+
+  // Raccourcis globaux. Ignorés dès que le curseur est dans un champ :
+  // sinon taper « n » dans une note ouvrait un nouveau projet.
+  let pendingGoto = false;
+  document.addEventListener("keydown", (e) => {
+    const tag = (e.target.tagName || "").toLowerCase();
+    const typing = tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable;
+
+    if (e.key === "Escape") {
+      close(overlay);
+      if (help) close(help);
+      return;
+    }
+    if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+
+    if (e.key === "/") { e.preventDefault(); open(); return; }
+    if (e.key === "?") { e.preventDefault(); openHelp(); return; }
+
+    if (pendingGoto) {
+      pendingGoto = false;
+      const url = (window.TIMING_ROUTES || {})[e.key.toLowerCase()];
+      if (url) { e.preventDefault(); window.location.href = url; }
+      return;
+    }
+    if (e.key === "g") { pendingGoto = true; setTimeout(() => { pendingGoto = false; }, 1200); return; }
+    if (e.key === "n") {
+      const url = (window.TIMING_ROUTES || {}).n;
+      if (url) { e.preventDefault(); window.location.href = url; }
+    }
   });
 })();

@@ -53,6 +53,15 @@ rythme observé, mais reste muet tant que moins de 10 % du temps est écoulé
 ou qu'il y a moins de trois saisies : divisé par un temps écoulé quasi nul,
 il était encore plus volatil que celui qu'il remplace.
 
+**Un cinquième principe** est arrivé avec le reste à faire déclaré : *une
+estimation vaut mieux qu'un prorata, tant qu'elle est fraîche*. Sans reste à
+faire renseigné, la cadence compare le budget consommé au temps écoulé, ce
+qui suppose que le travail avance au rythme du calendrier. Dès qu'un reste à
+faire est déclaré, c'est lui qui pilote la cadence — pendant trois semaines,
+au-delà desquelles l'app le signale comme périmé et repasse au prorata. Une
+estimation de deux mois pesant autant qu'une estimation du jour serait pire
+que pas d'estimation du tout.
+
 **Un quatrième principe** s'y est ajouté : *la charge suit le réel, pas le
 contrat*. Un projet non terminé continue d'occuper des journées au-delà de sa
 fin prévue, dans la limite réglable de 4 semaines, et le signale
@@ -62,9 +71,10 @@ précisément quand un projet en dépassement mangeait les journées à venir.
 ## Les pages
 
 - **Aujourd'hui** (`/`) — bandeau rouge des projets en difficulté (fin
-  dépassée, budget consommé, cadence en retard), alertes à traiter, saisie rapide, carte de charge
-  sur 8 semaines, chiffre d'affaires du mois et de l'année vs objectifs,
-  carnet de commandes, classement de rentabilité, cartes projets.
+  dépassée, budget consommé, cadence en retard), alertes à traiter, saisie
+  rapide, carte de charge sur 8 semaines, chiffre d'affaires du mois et de
+  l'année vs objectifs, carnet de commandes, cartes projets. Uniquement ce
+  qui appelle une décision aujourd'hui.
 - **Jour** (`/jour`) — une carte par projet, un grand champ de pourcentage,
   boutons 25/50/75/100 %, navigation veille / lendemain. Pensée pour le
   téléphone, là où la grille hebdo et ses neuf colonnes ne passent pas.
@@ -73,7 +83,13 @@ précisément quand un projet en dépassement mangeait les journées à venir.
   et bas naviguent d'une ligne à l'autre. Une case vide ou à 0 supprime la
   saisie. La grille regroupe par projet et par tâche ; pour une saisie avec
   note détaillée, passe par la fiche projet.
-- **Planning** (`/planning`) — deux vues. **Allocation par semaine** (par
+- **Planning** (`/planning`) — un simulateur et deux vues. Le **simulateur**
+  ajoute un projet fictif — nom, date de début, jours par semaine, durée —
+  et répond « ça tient » ou « ça ne tient pas », en comptant les jours
+  libres avant et après et les semaines qui basculent en surcharge. Rien
+  n'est écrit en base : répondre à « puis-je prendre ce projet ? » ne doit
+  pas coûter une ligne dans le carnet de commandes et les exports. Puis les
+  deux vues. **Allocation par semaine** (par
   défaut) : une grille projets × 13 semaines où chaque case donne le nombre de
   jours occupés, regroupée par client, avec en bas la comparaison
   « engagé / disponible » et les jours libres restants. C'est elle qui dit si
@@ -88,7 +104,9 @@ précisément quand un projet en dépassement mangeait les journées à venir.
   historique paginé avec **modification** de chaque saisie, et historique de
   périmètre.
 - **Facturation** (`/facturation`) — jalons en trois colonnes (à facturer,
-  facturé, encaissé), retards en tête, CA facturé par mois, et
+  facturé, encaissé), retards en tête, CA facturé par mois, **produit non
+  facturé** (le travail déjà fait valorisé au prix vendu, moins ce qui est
+  facturé — négatif quand c'est facturé d'avance), et
   **prévisionnel d'encaissement** sur trois mois basé sur le délai de
   paiement réellement constaté par client. Les jalons sont modifiables et
   leur date de facturation antidatable.
@@ -97,7 +115,14 @@ précisément quand un projet en dépassement mangeait les journées à venir.
   projets et sa facturation. Plus la répartition du CA, la part de chacun
   (alerte au-delà de 50 %) et la marge par jour réellement passé.
 - **Comparatif** (`/comparatif`) — rentabilité de tous les projets, temps par
-  tâche, et évolution mensuelle (jours travaillés + CA facturé).
+  tâche, évolution mensuelle (jours travaillés + CA facturé), et le
+  **classement** des projets les plus rentables avec le seuil de rentabilité
+  annuel. Ces deux derniers blocs vivaient sur l'accueil : ils relèvent
+  d'une revue mensuelle, pas de la question « que dois-je faire
+  aujourd'hui », et repoussaient la saisie sous la ligne de flottaison.
+- **Corbeille** (`/corbeille`) — saisies, jalons, coûts et absences
+  supprimés, restaurables trente jours. Chaque suppression propose son
+  annulation immédiate en bas d'écran.
 - **Absences** (`/absences`) — congés, fériés, indisponibilités.
 - **Réglages** (`/reglages`) — jours travaillés, seuils de charge, devise,
   seuil de fiabilité, alerte budget, objectifs de CA, exports et sauvegarde.
@@ -139,6 +164,19 @@ Facturation. Chaque jalon passe de « à facturer » à « facturé » (avec un
 numéro de facture) puis « encaissé ». C'est ce qui alimente le CA mensuel,
 les objectifs et le carnet de commandes.
 
+**Reste à faire.** Un champ sur la fiche projet, en jours, réajustable à
+volonté. Il donne la **terminaison prévue** (consommé + reste) et l'écart au
+budget vendu. C'est la seule alerte qui puisse sonner *avant* les faits :
+déclarer huit jours de reste sur un projet à qui il en reste trois est un
+dépassement acquis, même quand le compteur de budget affiche encore de la
+marge. Vider le champ efface l'estimation — « zéro jour restant » et « je ne
+sais pas » sont deux affirmations différentes.
+
+**Produit non facturé.** Les jours consommés valorisés au prix vendu par
+jour, moins ce qui est déjà facturé. Pour qui facture par jalons, c'est ce
+qui dit combien d'argent dort dans du travail livré. Une valeur négative
+veut dire facturé d'avance et n'est pas ramenée à zéro.
+
 **Coûts directs.** Sous-traitance, licences, déplacements. Déduits du prix
 par défaut ; cochés « refacturé au client », ils s'y **ajoutent** à la place.
 
@@ -167,7 +205,14 @@ où delta est l'écart entre budget consommé et temps écoulé. Plus un état
 
 ## Sauvegarder
 
-Réglages → Sauvegarde et export. Quatre exports CSV (saisies, projets,
+Une **sauvegarde automatique** est prise au premier lancement de chaque
+journée, dans `instance/backups/`, avec rotation sur sept jours. Une seule
+par jour : relancer l'app dix fois n'écrase pas dix fois l'état du matin,
+qui est justement celui qu'on veut pouvoir retrouver. Un disque plein ou un
+dossier en lecture seule prive de la sauvegarde du jour, jamais du
+démarrage.
+
+Manuellement : Réglages → Sauvegarde et export. Quatre exports CSV (saisies, projets,
 facturation, à facturer) et une **sauvegarde complète**, produite par
 `sqlite3.backup()` : en mode WAL, copier le fichier principal seul aurait
 donné une sauvegarde en retard sur la base réelle.
@@ -184,7 +229,7 @@ pip install pytest
 python3 -m pytest tests/ -q
 ```
 
-104 tests sur les calculs, la couche données et les routes : capacité en
+154 tests sur les calculs, la couche données et les routes : capacité en
 jours ouvrés, dépassement, rentabilité et garde-fous de fiabilité, coût de
 revient, indépendance des jours vis-à-vis du réglage horaire, détection des
 jours non saisis, validation des statuts, corbeille, grille hebdo (dates,
@@ -195,8 +240,18 @@ en compte des absences dans les projections, une connexion SQLite par
 requête, page d'erreur résiliente à une base indisponible, cycle de
 couleurs des projets immunisé contre une suppression définitive, collation
 insensible à la casse des noms de clients, routes de suppression qui ne
-mentent pas sur un id déjà supprimé, et déduplication des alertes du
-tableau de bord avec le bandeau de projets en difficulté.
+mentent pas sur un id déjà supprimé, déduplication des alertes du
+tableau de bord avec le bandeau de projets en difficulté, corbeille
+universelle (restauration à l'id d'origine, refus si le projet parent a
+disparu, purge à la borne inclusive), reste à faire déclaré (terminaison
+prévue, bascule et repli de la cadence, valeur illisible ignorée),
+simulation de charge (jamais persistée, comptée même provisoires masqués,
+respectueuse des absences, paramètre d'URL absurde sans page 500), produit
+non facturé, sauvegarde automatique (une par jour, rotation, cohérence en
+WAL), et les garanties d'interface qui ne se voyaient qu'à l'écran : aucune
+police chargée depuis le réseau, thème refusant une valeur inconnue,
+navigation déclarée une seule fois, feuille d'impression, cellules de charge
+atteignables au clavier, palette sans innerHTML.
 
 Chaque test documente en commentaire le bug qu'il empêche de revenir.
 
@@ -208,7 +263,8 @@ calculations.py     logique métier pure, sans Flask ni sqlite3
 db.py               tout le SQL, migrations automatiques, agrégats
 schema.sql          état cible du schéma
 templates/          pages Jinja2
-static/             CSS (thème blanc), JS sans framework, manifeste PWA
+static/             CSS (thèmes clair et sombre), polices woff2
+                    auto-hébergées, JS sans framework, manifeste PWA
 tests/              suite pytest
 ```
 
@@ -220,3 +276,32 @@ Une connexion SQLite est ouverte par requête, pas par fonction appelée :
 fermée au teardown. Hors d'une requête (tests, scripts), chaque appel garde
 une connexion jetable — le module ne dépend de Flask que pour ça, et
 fonctionne toujours sans.
+
+## Clavier
+
+Tout se fait au clavier, hors des champs de saisie.
+
+| Touche | Effet |
+|---|---|
+| `/` | palette : chercher un projet, un client ou une page |
+| `g` puis `a` `j` `s` `p` `f` `c` `r` | aujourd'hui, jour, semaine, planning, facturation, clients, projets |
+| `n` | nouveau projet |
+| `?` | liste des raccourcis |
+| `↑` `↓` | dans la grille hebdo, changer de ligne à colonne constante |
+| `←` `→` | dans la carte de charge, passer d'un jour à l'autre |
+| `Échap` | fermer la palette |
+
+## Thème et impression
+
+Le thème suit le système par défaut ; Réglages permet de forcer clair ou
+sombre. Le réglage vit en base et non dans le navigateur : il suit les
+données, pas la machine.
+
+Les couleurs de charge sont réaccordées pour le fond sombre, pas seulement
+assombries. Les fonds pastel d'origine y viraient au gris, et les trois
+niveaux — léger, chargé, tempête — cessaient de se distinguer, ce qui est
+précisément la seule chose que la carte doit faire.
+
+Chaque page s'imprime en A4 paysage sans le rail, les boutons ni les liens
+de filtre, et les grilles à défilement horizontal redeviennent entières :
+c'est ce qui transforme le planning ou le comparatif en support de revue.

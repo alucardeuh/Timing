@@ -112,6 +112,16 @@
       <p class="field-hint">Un projet non terminé continue d'occuper ta charge au-delà de sa fin prévue, dans cette limite.</p>
     </div>
 
+    <div class="field">
+      <label for="theme">Thème</label>
+      <select id="theme" name="theme">
+        <option value="auto" {{ 'selected' if settings.theme == 'auto' }}>Suivre le système</option>
+        <option value="light" {{ 'selected' if settings.theme == 'light' }}>Clair</option>
+        <option value="dark" {{ 'selected' if settings.theme == 'dark' }}>Sombre</option>
+      </select>
+      <p class="field-hint">Stocké en base, pas dans le navigateur : le réglage suit tes données.</p>
+    </div>
+
     <button type="submit" class="btn btn-primary">Enregistrer</button>
   </form>
 </section>
@@ -130,5 +140,22 @@
     <a href="{{ url_for('export', kind='to-invoice') }}" class="btn btn-ghost btn-sm">À facturer (CSV)</a>
     <a href="{{ url_for('backup') }}" class="btn btn-primary btn-sm">Sauvegarde complète</a>
   </div>
+  <p class="field-help-box" style="margin-top: var(--space-4);">
+    Une sauvegarde automatique est aussi prise <strong>au premier lancement de
+    chaque journée</strong>, dans <code>instance/backups/</code>, avec rotation
+    sur sept jours. Une sauvegarde manuelle ne protège que les gens qui y
+    pensent ; le cas réel est la fausse manipulation qu'on ne remarque que le
+    lendemain.
+  </p>
+</section>
+
+<section class="card section-gap" style="max-width: 640px;">
+  <div class="card-title-row"><h3>Corbeille</h3>
+    <a href="{{ url_for('trash_page') }}" class="faint">ouvrir →</a>
+  </div>
+  <p class="muted">
+    Les saisies, jalons, coûts et absences supprimés y restent restaurables
+    pendant trente jours.
+  </p>
 </section>
 {% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Corbeille — Timing{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Suppressions récentes</p>
+    <h1>Corbeille</h1>
+  </div>
+  {% if items %}
+  <form method="post" action="{{ url_for('empty_trash') }}"
+        onsubmit="return confirm('Vider la corbeille ? Cette action est définitive.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn-ghost btn-sm">Vider la corbeille</button>
+  </form>
+  {% endif %}
+</div>
+
+<section class="card">
+  <p class="faint" style="margin-top: 0;">
+    Les saisies, jalons, coûts et absences supprimés atterrissent ici et
+    restent restaurables pendant {{ retention }} jours. Les projets ont leur
+    propre corbeille, dans l'onglet du même nom de la page
+    <a href="{{ url_for('projects_list', status='trash') }}">Projets</a>.
+  </p>
+
+  {% if items %}
+    {% for item in items %}
+    <div class="trash-row">
+      <span class="trash-kind">{{ kind_labels.get(item.kind, item.kind) }}</span>
+      <span class="trash-label">{{ item.label }}</span>
+      <span class="trash-when mono">{{ item.deleted_at[:16]|replace('T', ' ') }}</span>
+      <form method="post" action="{{ url_for('restore_trash', trash_id=item.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="{{ url_for('trash_page') }}">
+        <button type="submit" class="btn btn-ghost btn-sm">Restaurer</button>
+      </form>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="faint">La corbeille est vide.</p>
+  {% endif %}
+</section>
+{% endblock %}

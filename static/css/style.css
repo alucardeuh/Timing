@@ -1,4 +1,73 @@
 /* ---------------------------------------------------------------------
+   Polices auto-hébergées (woff2, sous-ensemble latin)
+   font-display: swap — le texte s'affiche immédiatement dans la police
+   système puis bascule, plutôt que de laisser une page blanche.
+--------------------------------------------------------------------- */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/inter-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/inter-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/inter-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/space-grotesk-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/space-grotesk-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/space-grotesk-latin-700-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/jetbrains-mono-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/jetbrains-mono-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/jetbrains-mono-latin-600-normal.woff2') format('woff2');
+}
+
+/* ---------------------------------------------------------------------
    Timing — tokens (thème blanc)
 --------------------------------------------------------------------- */
 :root {
@@ -672,3 +741,254 @@ table.entries tr:hover td { background: var(--panel-2); }
 .client-grid { align-items: stretch; }
 .client-card { display: flex; flex-direction: column; }
 .client-card .client-metrics { margin-top: auto; }
+
+/* =====================================================================
+   Thème sombre
+   Tout le fichier passant déjà par des variables, un second jeu de
+   tokens suffit. Deux entrées : le réglage explicite (data-theme sur
+   <html>) et, en « auto », la préférence système.
+
+   Les couleurs de charge sont réaccordées, pas seulement assombries :
+   sur fond sombre, les fonds pastel d'origine viraient au gris et les
+   trois niveaux — léger, chargé, tempête — cessaient de se distinguer,
+   ce qui est précisément la seule chose que la carte doit faire.
+   ===================================================================== */
+:root[data-theme="dark"],
+:root[data-theme="auto"] {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="auto"] { color-scheme: dark; }
+}
+
+:root[data-theme="dark"] { color-scheme: dark; }
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="auto"] {
+    --bg:          #12151B;
+    --panel:       #191D25;
+    --panel-2:     #212630;
+    --border:      #2C3340;
+    --border-soft: #232935;
+
+    --text:        #E7EAF0;
+    --text-muted:  #9AA3B2;
+    --text-faint:  #6F7889;
+
+    --accent:      #3FA292;
+    --accent-light:#1C3B37;
+    --accent-text: #7BD3C2;
+
+    --load-light:    #46A192;
+    --load-light-bg: #1D3B37;
+    --load-heavy:    #D89A3C;
+    --load-heavy-bg: #3D3020;
+    --load-storm:    #D65A6E;
+    --load-storm-bg: #3E2028;
+
+    --danger:      #D65A6E;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg:          #12151B;
+  --panel:       #191D25;
+  --panel-2:     #212630;
+  --border:      #2C3340;
+  --border-soft: #232935;
+
+  --text:        #E7EAF0;
+  --text-muted:  #9AA3B2;
+  --text-faint:  #6F7889;
+
+  --accent:      #3FA292;
+  --accent-light:#1C3B37;
+  --accent-text: #7BD3C2;
+
+  --load-light:    #46A192;
+  --load-light-bg: #1D3B37;
+  --load-heavy:    #D89A3C;
+  --load-heavy-bg: #3D3020;
+  --load-storm:    #D65A6E;
+  --load-storm-bg: #3E2028;
+
+  --danger:      #D65A6E;
+}
+
+/* =====================================================================
+   Barre d'annulation
+   ===================================================================== */
+.undo-bar {
+  position: fixed; left: 50%; bottom: var(--space-5); transform: translateX(-50%);
+  z-index: 60; display: flex; align-items: center; gap: var(--space-4);
+  background: var(--text); color: var(--panel);
+  padding: var(--space-3) var(--space-4); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,.18); font-size: 13.5px;
+  max-width: calc(100vw - 2 * var(--space-4));
+}
+.undo-bar form { margin: 0; }
+.undo-action {
+  background: none; border: 1px solid rgba(255,255,255,.35); color: inherit;
+  font: inherit; font-weight: 600; padding: 2px 10px; border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.undo-action:hover { background: rgba(255,255,255,.12); }
+.undo-link { color: inherit; opacity: .65; font-size: 12.5px; }
+.undo-link:hover { opacity: 1; }
+.undo-bar.is-gone { display: none; }
+
+/* =====================================================================
+   Navigation basse (mobile) et palette de commandes
+   ===================================================================== */
+.tabbar { display: none; }
+
+.palette {
+  position: fixed; inset: 0; z-index: 80;
+  background: rgba(12,16,22,.45);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 12vh var(--space-4) var(--space-4);
+}
+.palette[hidden] { display: none; }
+.palette-box {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); width: min(560px, 100%);
+  box-shadow: 0 18px 48px rgba(0,0,0,.24); padding: var(--space-4);
+}
+.palette-box h3 { margin-bottom: var(--space-3); }
+#palette-input {
+  width: 100%; font: inherit; font-size: 16px; padding: var(--space-3);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--panel-2); color: var(--text);
+}
+.palette-results { list-style: none; margin: var(--space-3) 0 0; padding: 0; max-height: 46vh; overflow-y: auto; }
+.palette-results li {
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm);
+  display: flex; justify-content: space-between; gap: var(--space-3); cursor: pointer;
+}
+.palette-results li.is-active { background: var(--accent-light); color: var(--accent-text); }
+.palette-results .pal-meta { color: var(--text-faint); font-size: 12.5px; }
+.palette-hint { margin: var(--space-3) 0 0; font-size: 12px; }
+.shortcut-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.shortcut-list li { display: flex; gap: var(--space-3); align-items: baseline; }
+kbd {
+  font-family: var(--font-mono); font-size: 11.5px; background: var(--panel-2);
+  border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 4px; padding: 1px 6px; min-width: 22px; text-align: center;
+}
+
+@media (max-width: 620px) {
+  .tabbar {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+    background: var(--panel); border-top: 1px solid var(--border);
+    padding: var(--space-2) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
+  }
+  .tabbar a, .tabbar-more {
+    flex: 1; text-align: center; font-size: 11.5px; font-weight: 600;
+    color: var(--text-muted); padding: var(--space-2) 2px; border-radius: var(--radius-sm);
+    background: none; border: 0; font-family: inherit; cursor: pointer;
+  }
+  .tabbar a.is-active { color: var(--accent-text); background: var(--accent-light); }
+  /* Le rail garde le reste des pages, mais cesse d'occuper le haut de
+     chaque écran : les quatre gestes quotidiens sont en bas, sous le
+     pouce. */
+  .rail-nav { display: none; }
+  .rail { padding: var(--space-3) var(--space-4); }
+  .main { padding-bottom: 76px; }
+  .undo-bar { bottom: 72px; }
+}
+
+/* =====================================================================
+   Impression
+   Une revue de portefeuille se sort sur papier ou en PDF. Sans cette
+   feuille, l'impression emportait le rail, les boutons et les liens de
+   filtre, et coupait les grilles à la première colonne invisible.
+   ===================================================================== */
+@media print {
+  @page { margin: 12mm; size: A4 landscape; }
+
+  body { background: #FFF; font-size: 10.5pt; }
+  .shell { display: block; }
+  .rail, .tabbar, .undo-bar, .palette, .flashes,
+  .rank-switch, .tabs, .btn, .quick-add, form.inline-form,
+  .pagination, .grid-scroll::-webkit-scrollbar { display: none !important; }
+
+  /* Les grilles vivent dans un conteneur à défilement horizontal : à
+     l'impression, ce conteneur coupait tout ce qui dépassait de l'écran. */
+  .grid-scroll, .alloc-scroll { overflow: visible !important; }
+  .alloc, .entries { min-width: 0 !important; font-size: 9pt; }
+
+  .main { padding: 0; max-width: none; }
+  .card {
+    break-inside: avoid; page-break-inside: avoid;
+    box-shadow: none; border: 1px solid #CCC;
+  }
+  a { text-decoration: none; color: inherit; }
+  /* L'URL derrière chaque lien est du bruit sur un support de revue. */
+  a[href]::after { content: none !important; }
+  .section-gap { margin-top: 10mm; }
+}
+
+/* =====================================================================
+   Reste à faire déclaré, terminaison prévue, travail non facturé
+   ===================================================================== */
+.eac { display: grid; gap: var(--space-3); }
+.eac-row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.eac-input { width: 90px; }
+.eac-drift.is-over { color: var(--danger); font-weight: 600; }
+.eac-drift.is-under { color: var(--accent-text); font-weight: 600; }
+.eac-stale {
+  background: var(--load-heavy-bg); color: var(--load-heavy);
+  border-radius: var(--radius-sm); padding: 2px 8px; font-size: 12px; font-weight: 600;
+}
+
+.wip-row { display: flex; justify-content: space-between; gap: var(--space-3); padding: 6px 0;
+           border-bottom: 1px solid var(--border-soft); }
+.wip-row:last-child { border-bottom: 0; }
+.wip-neg { color: var(--text-muted); }
+
+/* =====================================================================
+   Simulation de charge (Planning)
+   ===================================================================== */
+.sim-form { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+.sim-form .field { display: flex; flex-direction: column; gap: 4px; }
+.sim-form label { font-size: 12px; color: var(--text-muted); }
+.sim-verdict {
+  display: flex; gap: var(--space-4); flex-wrap: wrap; align-items: baseline;
+  margin-top: var(--space-4); padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius); background: var(--accent-light); color: var(--accent-text);
+}
+.sim-verdict.is-tight { background: var(--load-storm-bg); color: var(--load-storm); }
+.sim-verdict strong { font-family: var(--font-display); font-size: 17px; }
+.sim-weeks { display: flex; gap: 4px; flex-wrap: wrap; margin-top: var(--space-3); }
+.sim-week {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 4px 8px; font-size: 12px; font-family: var(--font-mono);
+}
+.sim-week.is-over { border-color: var(--load-storm); color: var(--load-storm); }
+.sim-week.is-new-over { background: var(--load-storm-bg); font-weight: 600; }
+
+/* Le projet simulé se distingue des vrais dans la grille. */
+.alloc tr.is-scenario .alloc-name { font-style: italic; }
+.alloc tr.is-scenario td { background: var(--accent-light); }
+
+/* =====================================================================
+   Corbeille
+   ===================================================================== */
+.trash-row {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) 0; border-bottom: 1px solid var(--border-soft);
+}
+.trash-row:last-child { border-bottom: 0; }
+.trash-kind {
+  font-family: var(--font-mono); font-size: 11px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-faint); min-width: 72px;
+}
+.trash-label { flex: 1; }
+.trash-when { color: var(--text-faint); font-size: 12.5px; }
+
+/* Respect de « je préfère moins d'animation » : les transitions décoratives
+   ne sont pas une information. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

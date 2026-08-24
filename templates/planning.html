@@ -22,6 +22,84 @@
   </a>
 </div>
 
+{# Simulation. Répondre à « puis-je prendre ce projet ? » ne doit pas
+   obliger à créer le projet, donc à polluer le carnet de commandes, les
+   exports et le CA prévisionnel pour une question qui n'engage à rien. #}
+<section class="card">
+  <div class="card-title-row"><h3>Simuler un projet de plus</h3>
+    {% if scenario %}<a href="{{ url_for('planning', offset=offset, view=view, include_provisional=1 if include_provisional else 0) }}" class="faint">retirer la simulation</a>{% endif %}
+  </div>
+  <form method="get" action="{{ url_for('planning') }}" class="sim-form">
+    <input type="hidden" name="sim" value="1">
+    <input type="hidden" name="view" value="{{ view }}">
+    <input type="hidden" name="offset" value="{{ offset }}">
+    <input type="hidden" name="include_provisional" value="{{ 1 if include_provisional else 0 }}">
+    <div class="field">
+      <label for="sim_name">Nom</label>
+      <input type="text" id="sim_name" name="sim_name" maxlength="80" placeholder="Projet simulé"
+             value="{{ sim_args.get('sim_name', '') }}">
+    </div>
+    <div class="field">
+      <label for="sim_start">Début</label>
+      <input type="date" id="sim_start" name="sim_start" value="{{ sim_args.get('sim_start', today) }}">
+    </div>
+    <div class="field">
+      <label for="sim_days">Jours / semaine</label>
+      <input type="number" id="sim_days" name="sim_days" step="0.5" min="0.5" max="7"
+             value="{{ sim_args.get('sim_days', '2') }}">
+    </div>
+    <div class="field">
+      <label for="sim_duration">Durée</label>
+      <input type="number" id="sim_duration" name="sim_duration" step="0.5" min="0.5"
+             value="{{ sim_args.get('sim_duration', '6') }}">
+    </div>
+    <div class="field">
+      <label for="sim_unit">Unité</label>
+      <select id="sim_unit" name="sim_unit">
+        <option value="weeks" {{ 'selected' if sim_args.get('sim_unit') != 'months' }}>semaines</option>
+        <option value="months" {{ 'selected' if sim_args.get('sim_unit') == 'months' }}>mois</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-sm">Simuler</button>
+  </form>
+
+  {% if scenario_error %}
+  <p class="field-help-box">{{ scenario_error }}</p>
+  {% endif %}
+
+  {% if impact %}
+  <div class="sim-verdict {{ 'is-tight' if not impact.feasible }}">
+    <strong>
+      {% if impact.feasible %}Ça tient.{% else %}Ça ne tient pas.{% endif %}
+    </strong>
+    <span>
+      {{ impact.free_after }} jours libres après simulation, contre
+      {{ impact.free_before }} avant, sur la fenêtre affichée.
+    </span>
+    <span>
+      {% if impact.newly_over %}
+        {{ impact.newly_over }} semaine{{ 's' if impact.newly_over > 1 }} bascule{{ 'nt' if impact.newly_over > 1 }} en surcharge.
+      {% else %}
+        Aucune semaine ne bascule en surcharge.
+      {% endif %}
+    </span>
+  </div>
+  <div class="sim-weeks">
+    {% for w in impact.weeks %}
+    <span class="sim-week {{ 'is-over' if w.over }} {{ 'is-new-over' if w.newly_over }}"
+          title="Semaine du {{ w.label }} : {{ w.booked_after }} j engagés sur {{ w.capacity }} j disponibles">
+      {{ w.label }} · {{ '%g'|format(w.free_after) }}j
+    </span>
+    {% endfor %}
+  </div>
+  <p class="faint" style="margin-top: var(--space-3);">
+    Le projet simulé est compté comme signé, sinon il disparaîtrait au
+    moment même où l'on décoche les provisoires, c'est-à-dire quand on veut
+    le comparer au socle certain. Rien n'est écrit en base.
+  </p>
+  {% endif %}
+</section>
+
 {% if view == 'semaines' %}
   {% if grid.groups %}
   <section class="card">
@@ -56,11 +134,17 @@
             <td class="alloc-total mono">{{ '%g'|format(group.totals|sum) }}</td>
           </tr>
           {% for row in group.rows %}
-          <tr>
+          <tr class="{{ 'is-scenario' if row.project['is_scenario'] }}">
             <td class="alloc-name">
               <span class="pcard-color-dot" style="background:{{ row.project.color }};"></span>
-              <a href="{{ url_for('project_detail', project_id=row.project.id) }}">{{ row.project.name }}</a>
-              {% if row.project.status != 'confirmed' %}<span class="pill pill-{{ row.project.status }}">{{ status_label[row.project.status] }}</span>{% endif %}
+              {# Un projet simulé n'existe pas en base : lui coller un lien
+                 vers /projects/-1 aurait produit une 404 au clic. #}
+              {% if row.project['is_scenario'] %}
+                {{ row.project.name }} <span class="tag-pill">simulation</span>
+              {% else %}
+                <a href="{{ url_for('project_detail', project_id=row.project.id) }}">{{ row.project.name }}</a>
+              {% endif %}
+              {% if row.project.status != 'confirmed' and not row.project['is_scenario'] %}<span class="pill pill-{{ row.project.status }}">{{ status_label[row.project.status] }}</span>{% endif %}
               {% if row.project.weekdays %}<span class="tag-pill">{{ row.project.weekdays|weekday_names }}</span>{% endif %}
             </td>
             {% for cell in row.cells %}

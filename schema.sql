@@ -74,6 +74,14 @@ CREATE TABLE IF NOT EXISTS projects (
     color           TEXT NOT NULL DEFAULT '#3E8E82',
     notes           TEXT,
 
+    -- Reste à faire DÉCLARÉ, en jours. NULL = non renseigné, auquel cas
+    -- l'app retombe sur le prorata temporel. La cadence comparait le budget
+    -- consommé au temps écoulé, ce qui suppose une consommation linéaire :
+    -- un projet à 90 % de budget dont il reste trois jours de travail et un
+    -- projet à 90 % dont il reste trois semaines s'affichaient pareil.
+    remaining_days      REAL,
+    remaining_updated_at TEXT,
+
     -- Corbeille : un projet supprimé est d'abord archivé (réversible).
     -- La suppression définitive n'est possible que depuis l'onglet Corbeille.
     archived        INTEGER NOT NULL DEFAULT 0,
@@ -173,6 +181,19 @@ CREATE TABLE IF NOT EXISTS settings (
     value           TEXT NOT NULL
 );
 
+-- Corbeille universelle. La corbeille des projets protégeait les projets ;
+-- supprimer une saisie, un jalon, un coût ou une absence restait définitif,
+-- sans confirmation ni retour en arrière. Une ligne supprimée est désormais
+-- recopiée ici en JSON avant d'être effacée, restaurable avec son id
+-- d'origine, et purgée automatiquement au bout de TRASH_RETENTION_DAYS.
+CREATE TABLE IF NOT EXISTS trash (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT NOT NULL,
+    label           TEXT NOT NULL,
+    payload         TEXT NOT NULL,
+    deleted_at      TEXT NOT NULL
+);
+
 -- @INDEXES
 -- Tout ce qui suit est exécuté APRÈS les migrations.
 -- Un index peut porter sur une colonne ajoutée par migration (archived) ;
@@ -190,3 +211,4 @@ CREATE INDEX IF NOT EXISTS idx_absences_dates ON absences(start_date, end_date);
 CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status, archived);
 CREATE INDEX IF NOT EXISTS idx_projects_client ON projects(client_id);
 CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
+CREATE INDEX IF NOT EXISTS idx_trash_deleted ON trash(deleted_at);

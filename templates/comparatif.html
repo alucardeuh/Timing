@@ -14,6 +14,7 @@
   <a href="{{ url_for('comparatif', tab='rentabilite') }}" class="{{ 'is-active' if tab == 'rentabilite' }}">Rentabilité</a>
   <a href="{{ url_for('comparatif', tab='tache') }}" class="{{ 'is-active' if tab == 'tache' }}">Par tâche</a>
   <a href="{{ url_for('comparatif', tab='temps') }}" class="{{ 'is-active' if tab == 'temps' }}">Dans le temps</a>
+  <a href="{{ url_for('comparatif', tab='classement') }}" class="{{ 'is-active' if tab == 'classement' }}">Classement</a>
 </div>
 
 {% if tab == 'rentabilite' %}
@@ -48,6 +49,67 @@
     même sur un projet à peine commencé.
   </p>
 </section>
+
+{% elif tab == 'classement' %}
+{% if ranked %}
+<section class="card section-gap">
+  <div class="card-title-row">
+    <h3>Les plus rentables</h3>
+  </div>
+  <div class="rank-switch">
+    <span class="faint">trier par</span>
+    <a href="{{ url_for('comparatif', rank='margin', tab=tab) }}" class="{{ 'is-active' if rank_by == 'margin' }}">montant</a>
+    <a href="{{ url_for('comparatif', rank='day_rate', tab=tab) }}" class="{{ 'is-active' if rank_by == 'day_rate' }}">marge / jour</a>
+    <a href="{{ url_for('comparatif', rank='index', tab=tab) }}" class="{{ 'is-active' if rank_by == 'index' }}">indice</a>
+  </div>
+  <ul class="rank-list">
+    {% for r in ranked[:12] %}
+    <li class="rank-row">
+      <span class="rank-num">{{ '%02d'|format(loop.index) }}</span>
+      <a class="rank-name" href="{{ url_for('project_detail', project_id=r.project.id) }}">{{ r.project.name }}</a>
+      <span class="rank-amount mono">
+        {% if r.real_margin is not none %}{{ '{:,.0f}'.format(r.real_margin)|replace(',', ' ') }}{{ currency }}
+        {% else %}{{ '{:,.0f}'.format(r.net)|replace(',', ' ') }}{{ currency }}{% endif %}
+      </span>
+      <span class="rank-index {{ 'positive' if r.index >= 1 else 'negative' }}">×{{ '%.2f'|format(r.index) }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="faint" style="margin-top: var(--space-3);">
+    Seuls les projets assez avancés apparaissent ici : en dessous de
+    {{ settings.min_consumption_pct|int }} % de budget consommé, l'indice
+    n'est pas encore significatif. Le montant est affiché à côté de l'indice
+    parce qu'un ×1,8 sur 2 000 € pèse moins qu'un ×1,05 sur 40 000 €.
+  </p>
+</section>
+{% endif %}
+
+{% if not ranked %}
+<section class="card">
+  <p class="faint">Aucun projet n'est encore assez avancé pour qu'un indice de
+  rentabilité veuille dire quelque chose.</p>
+</section>
+{% endif %}
+
+{% if break_even %}
+<section class="card section-gap">
+  <div class="break-even">
+    <div class="card-title-row"><h3>Seuil de rentabilité</h3>
+      <span class="faint mono">{{ '%.0f'|format(break_even.cost_day_rate) }}{{ currency }} / jour de coût de revient</span>
+    </div>
+    <div class="goal-track goal-lg">
+      <div class="goal-fill" style="width: {{ [break_even.pct, 100]|min }}%;"></div>
+    </div>
+    <p class="faint">
+      {{ break_even.days_done }} jours travaillés cette année sur les
+      {{ break_even.days_needed }} visés pour couvrir
+      {{ '%.0f'|format(break_even.annual_fixed_costs) }}{{ currency }} de charges fixes
+      ({{ break_even.pct }}%).
+    </p>
+  </div>
+</section>
+{% endif %}
+
 
 {% elif tab == 'tache' %}
 <section class="card">
