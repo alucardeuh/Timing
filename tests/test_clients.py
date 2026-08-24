@@ -133,3 +133,77 @@ def test_migration_cree_les_fiches_depuis_les_noms_existants(base, tmp_path, mon
 
     base.init_db()  # idempotent : pas de doublon au redémarrage suivant
     assert len(base.list_client_records()) == 2
+
+
+def test_supprimer_une_fiche_client_survit_au_redemarrage(base):
+    """Une fiche supprimée ne doit pas réapparaître au lancement suivant.
+
+    _backfill_clients() recréait une fiche pour tout projet dont client_id
+    était NULL — or delete_client() met justement client_id à NULL (ON
+    DELETE SET NULL) tout en conservant le nom en clair sur le projet. Le
+    backfill rejoué à chaque init_db() ressuscitait donc chaque suppression :
+    la fiche disparaissait de la page Clients, puis revenait au redémarrage,
+    sans que rien ne l'explique à l'écran.
+    """
+    client_id = base.ensure_client("Alpha SA")
+    base.create_project(project_data(client="Alpha SA", client_id=client_id))
+    base.delete_client(client_id)
+    assert base.list_client_records() == []
+
+    base.init_db()  # simule un relancement de l'app
+
+    assert [r["name"] for r in base.list_client_records()] == []
+
+
+def test_next_project_color_survit_a_une_suppression_definitive(base):
+    """Compter COUNT(*) FROM projects redescendait après une suppression
+    définitive : le projet suivant recevait le même index de couleur qu'un
+    projet encore actif, sans rapport avec un passage par la corbeille.
+    sqlite_sequence, lui, ne redescend jamais."""
+    ids = []
+    for i in range(len(base.PROJECT_COLORS)):
+        color = base.next_project_color()
+        pid = base.create_project(project_data(name=f"P{i}"))
+        ids.append((pid, color))
+
+    # Toutes les couleurs du cycle ont été utilisées une fois.
+    assert {c for _, c in ids} == set(base.PROJECT_COLORS)
+
+    # Suppression définitive du tout premier projet — l'ancien calcul
+    # (COUNT(*)) aurait fait redescendre le compteur.
+    first_id = ids[0][0]
+    base.archive_project(first_id, True)
+    base.delete_project_forever(first_id)
+
+    next_color = base.next_project_color()
+    assert next_color not in {c for _, c in ids[1:]}  # pas de collision avec un projet encore actif
+
+
+def test_migration_nocase_ne_bloque_pas_sur_un_doublon_existant(base, tmp_path):
+    """Une base antérieure à ce correctif peut déjà contenir deux fiches
+    qui ne diffèrent que par la casse (créées hors des contrôles
+    applicatifs). La migration doit s'écarter plutôt que d'empêcher l'app
+    de démarrer."""
+    import sqlite3
+    path = tmp_path / "legacy.sqlite3"
+    raw = sqlite3.connect(path)
+    raw.executescript(
+        "CREATE TABLE clients (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "name TEXT NOT NULL UNIQUE, contact_name TEXT, email TEXT, phone TEXT, "
+        "address TEXT, default_day_rate REAL, payment_terms_days INTEGER, "
+        "notes TEXT, archived INTEGER NOT NULL DEFAULT 0, "
+        "created_at TEXT NOT NULL, updated_at TEXT);"
+        "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+    )
+    raw.execute("INSERT INTO clients (name, created_at) VALUES ('Gamma', 'x')")
+    raw.execute("INSERT INTO clients (name, created_at) VALUES ('gamma', 'x')")
+    raw.commit()
+    raw.close()
+
+    old_db_path, old_env = base.DB_PATH, __import__("os").environ.get("TIMING_DB")
+    base.DB_PATH = path
+    try:
+        base.init_db()  # ne doit pas lever
+        assert {r["name"] for r in base.list_client_records()} == {"Gamma", "gamma"}
+    finally:
+        base.DB_PATH = old_db_path

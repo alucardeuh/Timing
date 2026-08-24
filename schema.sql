@@ -14,7 +14,13 @@
 -- planning et les agrégats lisibles sans jointure supplémentaire.
 CREATE TABLE IF NOT EXISTS clients (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    name                TEXT NOT NULL UNIQUE,
+    -- COLLATE NOCASE : « Alpha SA » et « alpha sa » ne doivent former
+    -- qu'une seule fiche. get_client_by_name() compare déjà en NOCASE ;
+    -- sans cette collation ICI, la contrainte UNIQUE du SQL ne le savait
+    -- pas et aurait laissé les deux coexister au premier appel qui
+    -- contournait le contrôle applicatif. Sur une base plus ancienne,
+    -- db._ensure_clients_name_nocase() amène la table à cet état.
+    name                TEXT NOT NULL UNIQUE COLLATE NOCASE,
     contact_name        TEXT,
     email               TEXT,
     phone               TEXT,

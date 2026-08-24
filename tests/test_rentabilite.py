@@ -60,12 +60,18 @@ def test_indice_projete_a_mi_parcours(base):
     un écart de quelques centièmes selon la position des week-ends. C'est
     voulu : projeter sur du calendrier alors qu'on ne consomme que les jours
     ouvrés décalait la projection d'un facteur 7/5.
+
+    Le « milieu » n'est plus exactement 50 % depuis que planned_end_date est
+    une borne INCLUSE : 8 semaines couvrent 55 jours d'écart entre le
+    premier et le dernier (et non 56), donc J+28 tombe juste après la
+    moitié. C'est la valeur juste — l'ancien 50,0 pile était le symptôme du
+    jour de trop.
     """
     from datetime import date, timedelta
     project = make_project(start_date=(date.today() - timedelta(days=28)).isoformat())
     stats = calc.project_stats(project, agg(2000, count=20), SETTINGS)
 
-    assert stats["pct_time_elapsed"] == 50.0
+    assert 49.0 <= stats["pct_time_elapsed"] <= 51.0
     assert 0.95 <= stats["projected_index"] <= 1.05
 
 
@@ -143,3 +149,34 @@ def test_marge_reelle_absente_sans_reglage(base):
 
     assert stats["real_margin"] is None
     assert stats["net_of_costs"] == 18000.0
+
+
+def test_les_conges_decalent_la_date_de_fin_projetee(base):
+    """project_stats doit transmettre les absences aux deux projections.
+
+    Les appels passaient `today` à la place d'`absences` en position
+    positionnelle : les deux projections recevaient donc absences=None, et
+    tout le calcul en jours ouvrés hors congés était du code mort sur les
+    pages réelles. Trois semaines de congés déclarées ne décalaient pas
+    d'un jour la fin projetée, alors qu'elles vidaient bien la carte de
+    charge : deux vues de la même app racontaient deux histoires.
+    """
+    from datetime import date, timedelta
+    import calculations as calc
+    from conftest import SETTINGS, agg, make_project
+
+    debut = date.today() - timedelta(days=28)
+    project = make_project(start_date=debut.isoformat(), duration_value=8)
+    consomme = agg(1000, count=10, first_date=debut.isoformat())  # 10 jours passés
+
+    conges = [{"label": "Vacances", "kind": "conges",
+               "start_date": (date.today() + timedelta(days=1)).isoformat(),
+               "end_date": (date.today() + timedelta(days=21)).isoformat()}]
+
+    sans = calc.project_stats(project, consomme, SETTINGS)
+    avec = calc.project_stats(project, consomme, SETTINGS, absences=conges)
+
+    assert sans["projected_end_date"] is not None
+    assert avec["projected_end_date"] > sans["projected_end_date"]
+    # L'indice projeté partage la même base : il bouge aussi.
+    assert avec["projected_index"] != sans["projected_index"]

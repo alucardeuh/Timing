@@ -18,6 +18,17 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from flask import g as _g
+    from flask import has_app_context as _has_app_context
+except ImportError:  # pragma: no cover — Flask est une dépendance du
+    # projet ; ce repli existe uniquement pour que ce module reste
+    # important depuis un script ou un test qui n'installerait pas Flask.
+    _g = None
+
+    def _has_app_context():
+        return False
+
 BASE_DIR = Path(__file__).resolve().parent
 # Surchargeable par TIMING_DB : les tests tournent sur une base jetable.
 DB_PATH = Path(os.environ.get("TIMING_DB") or BASE_DIR / "instance" / "timing.sqlite3")
@@ -101,6 +112,27 @@ def now_iso() -> str:
 
 
 def get_db():
+    """Connexion SQLite.
+
+    À l'intérieur d'une requête Flask, UNE SEULE connexion est ouverte et
+    partagée pour toute la durée de la requête (posée sur `g`, fermée par
+    `close_db_for_request` au teardown). Avant ce correctif, chaque fonction
+    de ce module ouvrait sa propre connexion et la refermait aussitôt :
+    afficher la fiche d'un projet en ouvrait quatorze, chacune refaisant le
+    `mkdir` et les PRAGMA de départ.
+
+    Hors d'une requête (tests, scripts, `python3 app.py` au tout premier
+    appel), le comportement d'origine est conservé à l'identique : une
+    connexion jetable par appel, à fermer via `release_db`.
+    """
+    if _has_app_context():
+        if "db_conn" not in _g:
+            _g.db_conn = _open_connection()
+        return _g.db_conn
+    return _open_connection()
+
+
+def _open_connection():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     # timeout : plusieurs requêtes peuvent se croiser (page ouverte +
     # formulaire envoyé). Sans lui, SQLite lève "database is locked"
@@ -109,6 +141,32 @@ def get_db():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+def release_db(conn):
+    """Remplace chaque `conn.close()` de ce module.
+
+    Ferme réellement la connexion, SAUF si c'est celle, partagée, de la
+    requête Flask en cours — dans ce cas la fermer ici casserait le prochain
+    appel de la même requête. Sa fermeture attend alors le teardown
+    (`close_db_for_request`), posé une fois par `app.py` au démarrage.
+    """
+    if _has_app_context() and _g.get("db_conn") is conn:
+        return
+    conn.close()
+
+
+def close_db_for_request(_exception=None):
+    """Teardown Flask : ferme la connexion partagée en fin de requête.
+
+    Enregistrée par `app.teardown_appcontext(db.close_db_for_request)`.
+    `_exception` est le paramètre que Flask fournit toujours à un teardown,
+    même quand la requête s'est bien passée — il n'est pas utilisé ici.
+    """
+    if _g is not None:
+        conn = _g.pop("db_conn", None)
+        if conn is not None:
+            conn.close()  # ici, PAS release_db : c'est la fermeture réelle
 
 
 def init_db():
@@ -128,6 +186,7 @@ def init_db():
     tables_sql, _, indexes_sql = SCHEMA_PATH.read_text(encoding="utf-8").partition("-- @INDEXES")
     conn.executescript(tables_sql)
     _apply_migrations(conn)
+    _ensure_clients_name_nocase(conn)
     _backfill_clients(conn)
     if indexes_sql.strip():
         conn.executescript(indexes_sql)
@@ -135,7 +194,7 @@ def init_db():
     for key, value in DEFAULT_SETTINGS.items():
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def _apply_migrations(conn):
@@ -147,6 +206,78 @@ def _apply_migrations(conn):
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
+CLIENTS_COLLATION_FLAG = "clients_name_nocase_migrated"
+
+
+def _ensure_clients_name_nocase(conn):
+    """Réécrit clients.name en COLLATE NOCASE si la table existante ne l'a
+    pas déjà.
+
+    schema.sql décrit cette collation pour une base neuve, mais
+    `CREATE TABLE IF NOT EXISTS` ne touche pas une table déjà là : sans
+    cette migration, une base créée avant ce correctif gardait une
+    contrainte UNIQUE sensible à la casse, alors que get_client_by_name()
+    compare déjà en `COLLATE NOCASE`. L'écart ne mordait sur aucun chemin
+    connu de l'app — ensure_client(), new_client() et edit_client()
+    vérifient tous l'existence au préalable — mais restait une faille pour
+    le premier appel direct à create_client() qui contournerait ce
+    contrôle : « Alpha SA » et « alpha sa » auraient coexisté.
+
+    SQLite n'a pas d'ALTER COLUMN : la seule façon de changer une collation
+    est de reconstruire la table. `projects.client_id` y fait référence
+    (ON DELETE SET NULL) — reconstruire en conservant les mêmes `id`
+    (copiés explicitement, pas réattribués) garde ces références valides
+    sans y toucher.
+    """
+    done = conn.execute("SELECT value FROM settings WHERE key = ?",
+                        (CLIENTS_COLLATION_FLAG,)).fetchone()
+    if done and done["value"] == "1":
+        return
+    if not conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='clients'"
+    ).fetchone():
+        return  # table pas encore créée : schema.sql lui donne directement la bonne collation
+
+    conn.execute("DROP TABLE IF EXISTS clients_ncase")
+    conn.execute("""
+        CREATE TABLE clients_ncase (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            name                TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            contact_name        TEXT,
+            email               TEXT,
+            phone               TEXT,
+            address             TEXT,
+            default_day_rate    REAL,
+            payment_terms_days  INTEGER,
+            notes               TEXT,
+            archived            INTEGER NOT NULL DEFAULT 0,
+            created_at          TEXT NOT NULL,
+            updated_at          TEXT
+        )
+    """)
+    try:
+        conn.execute("INSERT INTO clients_ncase SELECT * FROM clients")
+    except sqlite3.IntegrityError:
+        # Deux fiches existantes ne diffèrent que par la casse : forcément
+        # créées par un chemin antérieur à ce correctif, hors des contrôles
+        # applicatifs. On abandonne plutôt que de bloquer le démarrage de
+        # l'app pour cette base précise ; à fusionner à la main, puis la
+        # migration passera au prochain lancement.
+        conn.execute("DROP TABLE clients_ncase")
+        return
+    conn.execute("DROP TABLE clients")
+    conn.execute("ALTER TABLE clients_ncase RENAME TO clients")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name)")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, '1')",
+                 (CLIENTS_COLLATION_FLAG,))
+
+
+# Marqueur de migration de données. Une migration de SCHÉMA peut se rejouer
+# sans dommage (la colonne existe ou non) ; une migration de DONNÉES, non :
+# rejouée, elle recrée ce que l'utilisateur a supprimé entre-temps.
+BACKFILL_FLAG = "clients_backfilled"
+
+
 def _backfill_clients(conn):
     """Crée une fiche pour chaque nom de client déjà saisi sur un projet.
 
@@ -155,11 +286,21 @@ def _backfill_clients(conn):
     après mise à jour donnerait une liste vide alors que les projets, eux,
     affichent toujours leurs clients.
 
-    Idempotent : ne touche qu'aux projets dont client_id est encore NULL.
+    NE TOURNE QU'UNE FOIS, et c'est le cœur du correctif. delete_client()
+    remet projects.client_id à NULL (ON DELETE SET NULL) tout en conservant
+    le nom en clair — exactement la signature que ce backfill cherchait.
+    Rejoué au démarrage suivant, il ressuscitait donc chaque fiche client
+    supprimée : la suppression tenait jusqu'au prochain lancement, puis
+    s'annulait toute seule.
     """
+    done = conn.execute("SELECT value FROM settings WHERE key = ?",
+                        (BACKFILL_FLAG,)).fetchone()
+    if done and done["value"] == "1":
+        return
+
     columns = {r["name"] for r in conn.execute("PRAGMA table_info(projects)")}
     if "client_id" not in columns:
-        return
+        return  # base d'avant la migration : on réessaiera au prochain démarrage
     orphans = conn.execute(
         "SELECT DISTINCT TRIM(client) AS name FROM projects "
         "WHERE client_id IS NULL AND client IS NOT NULL AND TRIM(client) != ''"
@@ -174,21 +315,57 @@ def _backfill_clients(conn):
         conn.execute("UPDATE projects SET client_id = ? WHERE client_id IS NULL AND TRIM(client) = ?",
                      (client["id"], name))
 
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, '1')",
+                 (BACKFILL_FLAG,))
+
 
 # --------------------------------------------------------------- réglages
 
+# Clés techniques qui vivent dans la même table `settings` que les réglages
+# affichables, mais qui n'ont rien à faire dans un template : la clé de
+# session en fait partie. get_settings() alimente `inject_globals()` et
+# plusieurs routes rendent `settings=settings` tel quel — la clé de session
+# s'y retrouvait donc dans le contexte Jinja de chaque page, prête à fuir
+# au premier `{{ settings }}` ou `{% for k, v in settings.items() %}` ajouté
+# par erreur. Aucun template actuel ne le fait, mais c'était une fuite qui
+# n'attendait qu'une occasion.
+INTERNAL_SETTING_KEYS = {"secret_key", BACKFILL_FLAG, CLIENTS_COLLATION_FLAG}
+
+
 def get_settings():
+    """Réglages publics, prêts à passer à un template.
+
+    Les clés internes (voir INTERNAL_SETTING_KEYS) sont filtrées ici, pas à
+    la source : la table `settings` reste le stockage clé/valeur générique
+    qu'elle a toujours été, seule cette fonction — le point d'entrée de
+    tout le reste de l'app — décide de ce qui est montrable.
+    """
     conn = get_db()
     rows = conn.execute("SELECT key, value FROM settings").fetchall()
-    conn.close()
+    release_db(conn)
     settings = dict(DEFAULT_SETTINGS)
-    settings.update({r["key"]: r["value"] for r in rows})
+    settings.update({r["key"]: r["value"] for r in rows
+                     if r["key"] not in INTERNAL_SETTING_KEYS})
     for key in FLOAT_SETTINGS:
         try:
             settings[key] = float(settings[key])
         except (TypeError, ValueError):
             settings[key] = float(DEFAULT_SETTINGS[key])
     return settings
+
+
+def get_setting_raw(key, default=None):
+    """Lit une valeur brute de la table `settings`, y compris une clé
+    interne que get_settings() masque.
+
+    Ce n'est PAS l'API publique des réglages : c'est la sortie de secours
+    pour les rares appels — la clé de session, au démarrage — qui ont
+    explicitement besoin d'une clé technique et savent ce qu'ils font.
+    """
+    conn = get_db()
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    release_db(conn)
+    return row["value"] if row else default
 
 
 def set_setting(key, value):
@@ -199,13 +376,25 @@ def set_setting(key, value):
         (key, str(value)),
     )
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def next_project_color():
+    """Couleur suivante dans le cycle des huit couleurs de PROJECT_COLORS.
+
+    Basé sur `sqlite_sequence`, pas sur COUNT(*) FROM projects : le compteur
+    AUTOINCREMENT de SQLite ne redescend jamais, même après une suppression
+    définitive, alors que COUNT(*) si. Avec COUNT(*), supprimer
+    définitivement un projet parmi huit puis en créer un nouveau donnait le
+    même index qu'un projet encore actif — deux projets vivants avec la même
+    couleur, sans lien avec un passage par la corbeille.
+    """
     conn = get_db()
-    n = conn.execute("SELECT COUNT(*) AS n FROM projects").fetchone()["n"]
-    conn.close()
+    row = conn.execute(
+        "SELECT seq FROM sqlite_sequence WHERE name = 'projects'"
+    ).fetchone()
+    release_db(conn)
+    n = row["seq"] if row else 0
     return PROJECT_COLORS[n % len(PROJECT_COLORS)]
 
 
@@ -233,7 +422,7 @@ def list_projects(status=None, archived=False, search=None, client=None):
         f"SELECT * FROM projects WHERE {' AND '.join(clauses)} ORDER BY start_date DESC, id DESC",
         params,
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return rows
 
 
@@ -243,7 +432,7 @@ def counts_by_status():
         "SELECT status, COUNT(*) AS n FROM projects WHERE archived = 0 GROUP BY status"
     ).fetchall()
     trash = conn.execute("SELECT COUNT(*) AS n FROM projects WHERE archived = 1").fetchone()["n"]
-    conn.close()
+    release_db(conn)
     counts = {s: 0 for s in PROJECT_STATUSES}
     counts.update({r["status"]: r["n"] for r in rows})
     counts["all"] = sum(counts[s] for s in PROJECT_STATUSES)
@@ -254,7 +443,7 @@ def counts_by_status():
 def get_project(project_id):
     conn = get_db()
     row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
-    conn.close()
+    release_db(conn)
     return row
 
 
@@ -269,7 +458,7 @@ def list_clients():
         "SELECT COALESCE(client, '') AS client, COUNT(*) AS n "
         "FROM projects WHERE archived = 0 GROUP BY COALESCE(client, '') ORDER BY client"
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return [dict(r) for r in rows]
 
 
@@ -289,14 +478,14 @@ def list_client_records(include_archived=False):
         sql += " WHERE c.archived = 0"
     sql += " ORDER BY c.name COLLATE NOCASE"
     rows = conn.execute(sql).fetchall()
-    conn.close()
+    release_db(conn)
     return rows
 
 
 def get_client(client_id):
     conn = get_db()
     row = conn.execute("SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
-    conn.close()
+    release_db(conn)
     return row
 
 
@@ -304,7 +493,7 @@ def get_client_by_name(name):
     conn = get_db()
     row = conn.execute("SELECT * FROM clients WHERE name = ? COLLATE NOCASE",
                        ((name or "").strip(),)).fetchone()
-    conn.close()
+    release_db(conn)
     return row
 
 
@@ -320,7 +509,7 @@ def create_client(data):
     )
     client_id = cur.lastrowid
     conn.commit()
-    conn.close()
+    release_db(conn)
     return client_id
 
 
@@ -355,7 +544,7 @@ def update_client(client_id, data):
     )
     conn.execute("UPDATE projects SET client = ? WHERE client_id = ?", (data["name"], client_id))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def set_client_archived(client_id, archived=True):
@@ -363,7 +552,7 @@ def set_client_archived(client_id, archived=True):
     conn.execute("UPDATE clients SET archived = ?, updated_at = ? WHERE id = ?",
                  (1 if archived else 0, now_iso(), client_id))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def delete_client(client_id):
@@ -373,7 +562,7 @@ def delete_client(client_id):
     conn = get_db()
     conn.execute("DELETE FROM clients WHERE id = ?", (client_id,))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def client_projects(client_id):
@@ -382,7 +571,7 @@ def client_projects(client_id):
         "SELECT * FROM projects WHERE client_id = ? AND archived = 0 "
         "ORDER BY start_date DESC", (client_id,)
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return rows
 
 
@@ -403,7 +592,7 @@ def create_project(data):
     )
     project_id = cur.lastrowid
     conn.commit()
-    conn.close()
+    release_db(conn)
     return project_id
 
 
@@ -459,7 +648,7 @@ def update_project(project_id, data, scope_note=""):
                 )
                 changed.append(label)
     conn.commit()
-    conn.close()
+    release_db(conn)
     return changed
 
 
@@ -470,7 +659,7 @@ def set_project_status(project_id, status):
     conn.execute("UPDATE projects SET status=?, updated_at=? WHERE id=?",
                  (status, now_iso(), project_id))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def archive_project(project_id, archived=True):
@@ -478,14 +667,14 @@ def archive_project(project_id, archived=True):
     conn.execute("UPDATE projects SET archived=?, updated_at=? WHERE id=?",
                  (1 if archived else 0, now_iso(), project_id))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def delete_project_forever(project_id):
     conn = get_db()
     conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def list_scope_changes(project_id):
@@ -493,7 +682,7 @@ def list_scope_changes(project_id):
     rows = conn.execute(
         "SELECT * FROM scope_changes WHERE project_id = ? ORDER BY changed_at DESC", (project_id,)
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return rows
 
 
@@ -526,7 +715,7 @@ def list_entries(project_id, limit=None, offset=0, date_from=None, date_to=None,
         params.extend([limit, offset])
     conn = get_db()
     rows = conn.execute(sql, params).fetchall()
-    conn.close()
+    release_db(conn)
     return rows
 
 
@@ -534,14 +723,14 @@ def count_entries(project_id, date_from=None, date_to=None, task_id=None):
     where, params = _entry_filters(project_id, date_from, date_to, task_id)
     conn = get_db()
     n = conn.execute(f"SELECT COUNT(*) AS n FROM entries WHERE {where}", params).fetchone()["n"]
-    conn.close()
+    release_db(conn)
     return n
 
 
 def get_entry(entry_id):
     conn = get_db()
     row = conn.execute("SELECT * FROM entries WHERE id = ?", (entry_id,)).fetchone()
-    conn.close()
+    release_db(conn)
     return row
 
 
@@ -554,7 +743,7 @@ def create_entry(project_id, entry_date, percent, hours, task_id=None, note=""):
     )
     entry_id = cur.lastrowid
     conn.commit()
-    conn.close()
+    release_db(conn)
     return entry_id
 
 
@@ -566,14 +755,14 @@ def update_entry(entry_id, entry_date, percent, hours, task_id=None, note=""):
         (entry_date, percent, hours, task_id, note, now_iso(), entry_id),
     )
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def delete_entry(entry_id):
     conn = get_db()
     conn.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def entries_aggregate_by_project():
@@ -588,7 +777,7 @@ def entries_aggregate_by_project():
         "MIN(entry_date) AS first_date, MAX(entry_date) AS last_date "
         "FROM entries GROUP BY project_id"
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return {
         r["project_id"]: {
             "percent_sum": r["percent_sum"] or 0.0,
@@ -607,7 +796,7 @@ def entries_aggregate_for(project_id):
         "MIN(entry_date) AS first_date, MAX(entry_date) AS last_date "
         "FROM entries WHERE project_id = ?", (project_id,)
     ).fetchone()
-    conn.close()
+    release_db(conn)
     return {
         "percent_sum": r["percent_sum"] or 0.0,
         "entries_count": r["n"] or 0,
@@ -624,7 +813,7 @@ def cumulative_entries(project_id):
         "SELECT entry_date, SUM(percent_of_day) AS percent_of_day FROM entries "
         "WHERE project_id = ? GROUP BY entry_date ORDER BY entry_date", (project_id,)
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return [dict(r) for r in rows]
 
 
@@ -637,7 +826,7 @@ def entries_by_day(start_date, end_date):
         "WHERE entry_date BETWEEN ? AND ? GROUP BY entry_date",
         (start_date, end_date),
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return {r["entry_date"]: r["pct"] or 0.0 for r in rows}
 
 
@@ -649,7 +838,7 @@ def today_summary(day_iso):
         "WHERE e.entry_date = ? GROUP BY e.project_id ORDER BY total_pct DESC",
         (day_iso,),
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return rows
 
 
@@ -661,7 +850,7 @@ def monthly_activity(months=12):
         "SELECT substr(entry_date, 1, 7) AS month, SUM(percent_of_day) / 100.0 AS days "
         "FROM entries GROUP BY month ORDER BY month DESC LIMIT ?", (months,)
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return [{"month": r["month"], "days": round(r["days"], 2)} for r in reversed(rows)]
 
 
@@ -681,7 +870,7 @@ def week_grid_cells(start_iso, end_iso):
         "GROUP BY project_id, task_id, entry_date",
         (start_iso, end_iso),
     ).fetchall()
-    conn.close()
+    release_db(conn)
     grid = {}
     for r in rows:
         grid.setdefault((r["project_id"], r["task_id"]), {})[r["entry_date"]] = r["pct"]
@@ -706,7 +895,7 @@ def set_day_totals(cells):
             for project_id, task_id, entry_date, percent, hours in cells:
                 _set_day_total(conn, project_id, task_id, entry_date, percent, hours)
     finally:
-        conn.close()
+        release_db(conn)
 
 
 def _set_day_total(conn, project_id, task_id, entry_date, percent, hours):
@@ -752,7 +941,7 @@ def list_tasks(project_id, include_archived=False):
         sql += " AND archived = 0"
     sql += " ORDER BY archived, name"
     rows = conn.execute(sql, (project_id,)).fetchall()
-    conn.close()
+    release_db(conn)
     return rows
 
 
@@ -761,7 +950,7 @@ def list_all_active_tasks():
     hebdo en a besoin pour tous les projets d'un coup."""
     conn = get_db()
     rows = conn.execute("SELECT * FROM tasks WHERE archived = 0 ORDER BY name").fetchall()
-    conn.close()
+    release_db(conn)
     by_project = {}
     for r in rows:
         by_project.setdefault(r["project_id"], []).append(dict(r))
@@ -771,7 +960,7 @@ def list_all_active_tasks():
 def task_names():
     conn = get_db()
     rows = conn.execute("SELECT id, name FROM tasks").fetchall()
-    conn.close()
+    release_db(conn)
     return {r["id"]: r["name"] for r in rows}
 
 
@@ -780,21 +969,21 @@ def create_task(project_id, name):
     conn.execute("INSERT INTO tasks (project_id, name, archived, created_at) VALUES (?,?,0,?)",
                  (project_id, name, now_iso()))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def rename_task(task_id, name):
     conn = get_db()
     conn.execute("UPDATE tasks SET name = ? WHERE id = ?", (name, task_id))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def set_task_archived(task_id, archived=True):
     conn = get_db()
     conn.execute("UPDATE tasks SET archived = ? WHERE id = ?", (1 if archived else 0, task_id))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def delete_task(task_id):
@@ -804,13 +993,13 @@ def delete_task(task_id):
     conn = get_db()
     conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def get_task_project(task_id):
     conn = get_db()
     row = conn.execute("SELECT project_id FROM tasks WHERE id = ?", (task_id,)).fetchone()
-    conn.close()
+    release_db(conn)
     return row["project_id"] if row else None
 
 
@@ -822,7 +1011,7 @@ def task_breakdown(project_id):
         "FROM entries e LEFT JOIN tasks t ON t.id = e.task_id "
         "WHERE e.project_id = ? GROUP BY e.task_id ORDER BY days DESC", (project_id,)
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return [dict(r) for r in rows]
 
 
@@ -833,7 +1022,7 @@ def task_breakdown_global():
         "FROM entries e LEFT JOIN tasks t ON t.id = e.task_id "
         "GROUP BY COALESCE(t.name, 'Sans tâche') ORDER BY days DESC"
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return [dict(r) for r in rows]
 
 
@@ -847,8 +1036,15 @@ def list_absences(upcoming_only=False, today_iso=None):
         ).fetchall()
     else:
         rows = conn.execute("SELECT * FROM absences ORDER BY start_date DESC").fetchall()
-    conn.close()
+    release_db(conn)
     return rows
+
+
+def get_absence(absence_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM absences WHERE id = ?", (absence_id,)).fetchone()
+    release_db(conn)
+    return row
 
 
 def create_absence(label, kind, start_date, end_date):
@@ -860,14 +1056,14 @@ def create_absence(label, kind, start_date, end_date):
         (label, kind, start_date, end_date, now_iso()),
     )
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def delete_absence(absence_id):
     conn = get_db()
     conn.execute("DELETE FROM absences WHERE id = ?", (absence_id,))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 # --------------------------------------------------------------- facturation
@@ -885,7 +1081,7 @@ def list_milestones(project_id=None):
             "SELECT * FROM milestones WHERE project_id = ? ORDER BY COALESCE(due_date, '9999'), id",
             (project_id,),
         ).fetchall()
-    conn.close()
+    release_db(conn)
     return rows
 
 
@@ -897,7 +1093,7 @@ def create_milestone(project_id, label, amount, due_date):
         (project_id, label, amount, due_date or None, now_iso()),
     )
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def update_milestone(milestone_id, label, amount, due_date):
@@ -912,7 +1108,7 @@ def update_milestone(milestone_id, label, amount, due_date):
     conn.execute("UPDATE milestones SET label=?, amount=?, due_date=? WHERE id=?",
                  (label, amount, due_date or None, milestone_id))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def set_milestone_status(milestone_id, status, invoice_ref=None, dated=None):
@@ -946,20 +1142,20 @@ def set_milestone_status(milestone_id, status, invoice_ref=None, dated=None):
     conn.execute(f"UPDATE milestones SET {assignments} WHERE id = ?",
                  [*fields.values(), milestone_id])
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def delete_milestone(milestone_id):
     conn = get_db()
     conn.execute("DELETE FROM milestones WHERE id = ?", (milestone_id,))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def get_milestone(milestone_id):
     conn = get_db()
     row = conn.execute("SELECT * FROM milestones WHERE id = ?", (milestone_id,)).fetchone()
-    conn.close()
+    release_db(conn)
     return row
 
 
@@ -979,7 +1175,7 @@ def milestone_totals_by_project():
         "SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) AS paid "
         "FROM milestones GROUP BY project_id"
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return {r["project_id"]: {"total": r["total"] or 0, "invoiced": r["invoiced"] or 0,
                              "paid": r["paid"] or 0} for r in rows}
 
@@ -1000,7 +1196,7 @@ def monthly_invoiced(months=12):
         "WHERE p.archived = 0 AND m.invoiced_at IS NOT NULL AND m.invoiced_at != '' "
         "GROUP BY month ORDER BY month DESC LIMIT ?", (months,)
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return [{"month": r["month"], "amount": round(r["amount"] or 0, 2)} for r in reversed(rows)]
 
 
@@ -1013,7 +1209,7 @@ def invoiced_between(start_iso, end_iso):
         "AND m.invoiced_at BETWEEN ? AND ?",
         (start_iso, end_iso),
     ).fetchone()
-    conn.close()
+    release_db(conn)
     return r["amount"] or 0.0
 
 
@@ -1025,7 +1221,7 @@ def list_costs(project_id):
         "SELECT * FROM costs WHERE project_id = ? ORDER BY COALESCE(cost_date, created_at) DESC",
         (project_id,),
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return rows
 
 
@@ -1037,20 +1233,20 @@ def create_cost(project_id, label, amount, cost_date, billable=False):
         (project_id, label, amount, cost_date or None, 1 if billable else 0, now_iso()),
     )
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def delete_cost(cost_id):
     conn = get_db()
     conn.execute("DELETE FROM costs WHERE id = ?", (cost_id,))
     conn.commit()
-    conn.close()
+    release_db(conn)
 
 
 def get_cost_project(cost_id):
     conn = get_db()
     row = conn.execute("SELECT project_id FROM costs WHERE id = ?", (cost_id,)).fetchone()
-    conn.close()
+    release_db(conn)
     return row["project_id"] if row else None
 
 
@@ -1067,7 +1263,7 @@ def costs_by_project():
         "SUM(CASE WHEN billable = 1 THEN amount ELSE 0 END) AS rebilled "
         "FROM costs GROUP BY project_id"
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return {r["project_id"]: {"absorbed": r["absorbed"] or 0.0,
                              "rebilled": r["rebilled"] or 0.0} for r in rows}
 
@@ -1090,7 +1286,7 @@ def export_entries():
         "FROM entries e JOIN projects p ON p.id = e.project_id "
         "LEFT JOIN tasks t ON t.id = e.task_id ORDER BY e.entry_date DESC, p.name"
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return [dict(r) for r in rows]
 
 
@@ -1107,7 +1303,7 @@ def export_projects():
         "COALESCE((SELECT SUM(amount) FROM milestones WHERE project_id = p.id AND status = 'paid'), 0) AS encaisse "
         "FROM projects p WHERE p.archived = 0 ORDER BY p.start_date DESC"
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return [dict(r) for r in rows]
 
 
@@ -1121,7 +1317,7 @@ def export_milestones():
         "FROM milestones m JOIN projects p ON p.id = m.project_id "
         "ORDER BY COALESCE(m.due_date, '9999')"
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return [dict(r) for r in rows]
 
 
@@ -1141,7 +1337,7 @@ def backup_to(destination):
             source.backup(target)
     finally:
         target.close()
-        source.close()
+        release_db(source)
     return destination
 
 
@@ -1186,7 +1382,7 @@ def days_spent_between(start_iso, end_iso):
         "WHERE p.archived = 0 AND e.entry_date BETWEEN ? AND ?",
         (start_iso, end_iso),
     ).fetchone()
-    conn.close()
+    release_db(conn)
     return round(r["days"] or 0.0, 2)
 
 
@@ -1205,7 +1401,7 @@ def payment_delays():
         "WHERE p.archived = 0 AND m.status = 'paid' "
         "AND m.paid_at IS NOT NULL AND m.invoiced_at IS NOT NULL"
     ).fetchall()
-    conn.close()
+    release_db(conn)
     by_client = {}
     for r in rows:
         if r["delay"] is None or r["delay"] < 0:
@@ -1225,7 +1421,7 @@ def contractual_delays():
     rows = conn.execute(
         "SELECT name, payment_terms_days FROM clients WHERE payment_terms_days IS NOT NULL"
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return {r["name"]: r["payment_terms_days"] for r in rows}
 
 
@@ -1238,7 +1434,7 @@ def open_milestones():
         "WHERE p.archived = 0 AND m.status != 'paid' "
         "ORDER BY COALESCE(m.due_date, '9999')"
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return rows
 
 
@@ -1259,5 +1455,5 @@ def export_to_invoice():
         "WHERE p.archived = 0 AND m.status != 'paid' "
         "ORDER BY COALESCE(m.due_date, '9999'), client"
     ).fetchall()
-    conn.close()
+    release_db(conn)
     return [dict(r) for r in rows]

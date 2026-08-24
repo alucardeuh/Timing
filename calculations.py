@@ -74,12 +74,22 @@ def build_absence_index(absences):
 
     Développer les intervalles une fois pour toutes évite de reparcourir la
     liste des absences pour chacun des 91 jours du planning.
+
+    `MAX_SPAN_DAYS` est un filet, pas la validation principale — celle-ci
+    vit dans app.py (valid_date borne les années saisissables). Il protège
+    une absence déjà en base avant ce correctif, dont la date de fin
+    aberrante ferait sinon boucler cette fonction sur des dizaines de
+    milliers de jours à chaque page qui affiche la carte de charge.
     """
+    MAX_SPAN_DAYS = 730  # ~2 ans : au-delà, une fin de congé est presque
+    # sûrement une faute de frappe plutôt qu'une vraie absence continue.
     index = {}
     for a in absences:
         start, end = parse_date(a["start_date"]), parse_date(a["end_date"])
         if end < start:
             start, end = end, start
+        if (end - start).days > MAX_SPAN_DAYS:
+            end = start + timedelta(days=MAX_SPAN_DAYS)
         day = start
         while day <= end:
             index[day] = a["label"]
@@ -133,8 +143,24 @@ def resolve_price(day_rate, price_total, total_days):
 
 
 def planned_end_date(project):
+    """Dernier jour couvert par le contrat — borne INCLUSE.
+
+    Le `- 1` est le correctif : `start + semaines * 7` désignait le
+    lendemain de la fin, pas la fin. Un projet d'une semaine démarré le
+    lundi 2 finissait le lundi 9, donc s'étalait sur six jours ouvrés pour
+    cinq jours vendus. Tout en découlait : une colonne de charge en trop
+    par projet, une barre Gantt trop longue, un `pct_time_elapsed`
+    sous-estimé, et l'alerte « fin prévue dépassée » qui arrivait un jour
+    en retard.
+
+    Avec la borne incluse, une semaine pleine va du lundi au dimanche : sept
+    jours calendaires qui contiennent exactement les cinq jours ouvrés
+    vendus. Inutile donc de reculer sur le dernier jour ouvré — le week-end
+    porte déjà une charge nulle.
+    """
     start = parse_date(project["start_date"])
-    return start + timedelta(days=round(total_weeks(project) * 7))
+    span_days = max(1, round(total_weeks(project) * 7))
+    return start + timedelta(days=span_days - 1)
 
 
 # ------------------------------------------------------------ agrégation
@@ -451,7 +477,20 @@ def break_even(settings, days_billed_this_year):
 
 # --------------------------------------------------------- stats projet
 
-def project_stats(project, agg, settings, costs=0.0, invoiced=None, today=None):
+def project_stats(project, agg, settings, costs=0.0, invoiced=None, today=None,
+                  absences=None):
+    """Toutes les statistiques d'un projet, en une passe.
+
+    `absences` est transmis aux deux projections. Il manquait : les appels
+    passaient `today` en quatrième position positionnelle de
+    `projected_end_date` et en cinquième de
+    `projected_rentability_index`, ce qui laissait `absences` à None dans
+    les deux cas. Tout le calcul en jours ouvrés hors congés
+    (`working_days_between` + `absence_index`) était donc du code mort sur
+    les pages réelles : trois semaines de congés déclarées ne décalaient pas
+    d'un jour la date de fin projetée, alors qu'elles décalaient bien la
+    carte de charge. Deux vues de la même app racontaient deux histoires.
+    """
     agg = agg or EMPTY_AGG
     today = today or date.today()
 
@@ -474,11 +513,12 @@ def project_stats(project, agg, settings, costs=0.0, invoiced=None, today=None):
         "theoretical_hourly_rate": theoretical_hourly_rate(project, settings),
         "real_hourly_rate": real_hourly_rate(project, agg, settings, costs) if reliable else None,
         "rentability_index": rentability_index(project, agg, settings, costs),
-        "projected_index": projected_rentability_index(project, agg, settings, costs, today),
+        "projected_index": projected_rentability_index(project, agg, settings, costs,
+                                                       today, absences),
         "index_reliable": reliable,
         "pace_status": pace_status(project, agg, today),
         "planned_end_date": planned_end_date(project),
-        "projected_end_date": projected_end_date(project, agg, settings, today),
+        "projected_end_date": projected_end_date(project, agg, settings, today, absences),
         "entries_count": agg.get("entries_count") or 0,
         "costs": round(split_costs(costs)[0], 2),
         "rebilled_costs": round(split_costs(costs)[1], 2),
@@ -548,13 +588,24 @@ def project_weekdays(project, settings):
 
 
 def project_daily_pct(project, day, settings):
-    """Charge que ce projet pose sur ce jour précis, en pourcentage."""
-    days, explicit = project_weekdays(project, settings)
+    """Charge que ce projet pose sur ce jour précis, en pourcentage.
+
+    Même formule dans les deux cas : jours vendus par semaine ÷ nombre de
+    jours qui les portent. Les jours déclarés étaient auparavant plafonnés
+    à 100 % (`min(..., 1.0)`), pas les jours lissés — donc un projet vendu
+    5 j/semaine concentré sur lundi et mardi s'affichait à 100 % au lieu de
+    250 %, et la grille d'allocation comptait 2 jours engagés là où le
+    contrat en vendait 5.
+
+    Le plafond mentait dans le sens rassurant, et précisément là où le
+    planning est censé être littéral : déclarer des jours impossibles doit
+    faire réagir la carte, pas la calmer. Un dépassement de 100 % est une
+    information, pas une valeur à écrêter — c'est déjà ce que fait le
+    lissage, et ce que fait le cumul de deux projets sur un même jour.
+    """
+    days, _explicit = project_weekdays(project, settings)
     if day.weekday() not in days:
         return 0.0
-    if explicit:
-        # Réparti sur les seuls jours déclarés, plafonné à la journée pleine.
-        return min(project["days_per_week"] / len(days), 1.0) * 100
     return project["days_per_week"] / len(days) * 100
 
 
@@ -579,6 +630,27 @@ def project_is_overrunning(project, day):
     return day > planned_end_date(project)
 
 
+def _project_load_profile(project, settings, overrun_weeks):
+    """Ce qui ne dépend PAS du jour, calculé une fois par projet.
+
+    daily_capacity() appelait project_weekdays(), planned_end_date() et
+    parse_date(project["start_date"]) une fois PAR JOUR PAR PROJET — sur
+    une fenêtre de 56 jours (8 semaines), c'est 56 fois plus de travail que
+    nécessaire, puisqu'aucune de ces valeurs ne change d'un jour à l'autre
+    pour un même projet. La boucle jour n'a plus qu'à comparer des dates et
+    tester une appartenance à un ensemble.
+    """
+    weekdays, _explicit = project_weekdays(project, settings)
+    pct_per_day = project["days_per_week"] / len(weekdays) * 100 if weekdays else 0.0
+    start = parse_date(project["start_date"])
+    planned_end = planned_end_date(project)
+    end = planned_end
+    if overrun_weeks and project["status"] in ("confirmed", "provisional"):
+        end = planned_end + timedelta(weeks=overrun_weeks)
+    return {"weekdays": weekdays, "pct_per_day": pct_per_day,
+           "start": start, "end": end, "planned_end": planned_end}
+
+
 def daily_capacity(projects, window_start, window_days, include_provisional,
                    settings, absences=None):
     """Charge cumulée jour par jour sur la fenêtre.
@@ -594,8 +666,10 @@ def daily_capacity(projects, window_start, window_days, include_provisional,
     """
     absence_index = build_absence_index(absences or [])
     working = working_days_set(settings)
-    n_working = len(working)
     overrun_weeks = settings.get("overrun_weeks", 4)
+
+    eligible = [p for p in projects if p["status"] in ACTIVE_LOAD_STATUSES | OPTIONAL_LOAD_STATUSES]
+    profiles = [(p, _project_load_profile(p, settings, overrun_weeks)) for p in eligible]
 
     days = []
     for i in range(window_days):
@@ -609,15 +683,15 @@ def daily_capacity(projects, window_start, window_days, include_provisional,
         pct_confirmed = pct_provisional = 0.0
         contributors = []
         if not off_reason:
-            for p in projects:
-                if p["status"] not in ACTIVE_LOAD_STATUSES | OPTIONAL_LOAD_STATUSES:
+            for p, profile in profiles:
+                if not (profile["start"] <= day <= profile["end"]):
                     continue
-                if not project_is_active_on(p, day, overrun_weeks):
+                if day.weekday() not in profile["weekdays"]:
                     continue
-                daily_pct = project_daily_pct(p, day, settings)
+                daily_pct = profile["pct_per_day"]
                 if daily_pct <= 0:
                     continue
-                overrun = project_is_overrunning(p, day)
+                overrun = day > profile["planned_end"]
                 if p["status"] == "confirmed":
                     pct_confirmed += daily_pct
                     contributors.append({"name": p["name"], "pct": round(daily_pct, 1),
@@ -701,53 +775,35 @@ def missing_days(entries_by_day, settings, absences, today=None, lookback=14):
 
 # ------------------------------------------------------------------ alertes
 
-def build_alerts(project_rows, capacity, milestones, missing, settings, today=None):
+def build_alerts(project_rows, capacity, milestones, missing, today=None):
     """Liste d'alertes triées par gravité.
 
-    Chaque alerte est un dict {level, text, url_name, url_arg} : la mise en
-    forme reste au template, la décision reste ici (donc testable).
+    Volontairement muette sur tout ce qui concerne un projet précis —
+    budget, cadence, dépassement de fin — parce que late_projects() (le
+    bandeau rouge du tableau de bord) le dit déjà, en réunissant toutes les
+    raisons d'un même projet sur UNE ligne plutôt que d'en éparpiller une
+    par raison ici avec une formulation différente. Avant ce correctif, un
+    projet en retard apparaissait deux fois sur la même page, sous deux
+    formes qui se recoupaient sans se répondre exactement.
+
+    Ce qui reste ici est ce que late_projects() ne couvre pas : les jalons
+    de facturation, les jours non saisis, la surcharge de la carte de
+    charge, et l'échéance qui approche sans être encore un dépassement (donc
+    hors du champ de late_projects, qui ne parle que de ce qui a DÉJÀ
+    débordé).
     """
     today = today or date.today()
     alerts = []
-    budget_threshold = settings.get("budget_alert_pct", 80)
 
     for row in project_rows:
         p, stats = row["project"], row["stats"]
-        if p["status"] not in LIVE_STATUSES:
+        if p["status"] != "confirmed":
             continue
-        if stats["pct_consumed"] >= 100:
-            alerts.append({
-                "level": "danger",
-                "text": f"{p['name']} a dépassé son budget vendu ({stats['pct_consumed']} %).",
-                "url_name": "project_detail", "url_arg": p["id"],
-            })
-        elif stats["pct_consumed"] >= budget_threshold:
-            alerts.append({
-                "level": "warning",
-                "text": f"{p['name']} a consommé {stats['pct_consumed']} % de son budget.",
-                "url_name": "project_detail", "url_arg": p["id"],
-            })
-        if stats["pace_status"] == "behind":
-            alerts.append({
-                "level": "warning",
-                "text": f"{p['name']} brûle son budget plus vite que le temps ne passe.",
-                "url_name": "project_detail", "url_arg": p["id"],
-            })
         end = stats["planned_end_date"]
-        if p["status"] == "confirmed" and today <= end <= today + timedelta(days=14):
+        if today <= end <= today + timedelta(days=14):
             alerts.append({
                 "level": "info",
                 "text": f"{p['name']} se termine le {end.isoformat()}.",
-                "url_name": "project_detail", "url_arg": p["id"],
-            })
-        elif p["status"] == "confirmed" and end < today:
-            # L'information la plus actionnable de l'app : ce projet devait
-            # être fini, il ne l'est pas, et il occupe encore des journées.
-            jours = (today - end).days
-            alerts.append({
-                "level": "danger",
-                "text": (f"{p['name']} est prolongé de {jours} jour(s) au-delà de sa "
-                         "fin prévue et occupe encore ta charge."),
                 "url_name": "project_detail", "url_arg": p["id"],
             })
 

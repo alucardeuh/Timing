@@ -105,10 +105,15 @@ précisément quand un projet en dépassement mangeait les journées à venir.
 ## Concepts
 
 **Jours de la semaine.** Un projet peut déclarer les jours qu'il occupe
-réellement (« lundi et mercredi »). La charge s'y concentre alors à 100 %.
+réellement (« lundi et mercredi »). La charge s'y concentre alors entièrement.
 Sans rien déclarer, elle est **lissée** sur tous les jours ouvrés : un projet
 vendu 2 j/semaine apparaît à 40 % du lundi au vendredi — une moyenne honnête,
 mais pas un planning. Cocher les jours rend le planning littéral.
+
+Littéral veut dire littéral : déclarer 5 jours vendus sur deux jours de la
+semaine affiche 250 % sur ces deux jours, pas 100 %. Un engagement
+impossible doit faire réagir la carte, pas être écrêté en silence — c'est le
+même parti pris que pour deux projets qui se chevauchent.
 
 **Clients.** Chaque client a une fiche : coordonnées, TJM habituel, délai de
 paiement contractuel, notes. Deux façons d'en créer une — depuis la page
@@ -179,12 +184,19 @@ pip install pytest
 python3 -m pytest tests/ -q
 ```
 
-81 tests sur les calculs et la couche données : capacité en jours ouvrés,
-dépassement, rentabilité et garde-fous de fiabilité, coût de revient,
-indépendance des jours vis-à-vis du réglage horaire, détection des jours non
-saisis, validation des statuts, corbeille, grille hebdo (dates, atomicité,
-lignes d'affichage), jeton CSRF et redirections, prévisionnel d'encaissement,
-coûts refacturables, et migration d'une base créée par la V1.
+104 tests sur les calculs, la couche données et les routes : capacité en
+jours ouvrés, dépassement, rentabilité et garde-fous de fiabilité, coût de
+revient, indépendance des jours vis-à-vis du réglage horaire, détection des
+jours non saisis, validation des statuts, corbeille, grille hebdo (dates,
+atomicité, lignes d'affichage), jeton CSRF et redirections, prévisionnel
+d'encaissement, coûts refacturables, migration d'une base créée par la V1,
+non-résurrection d'une fiche client supprimée, borne de fin incluse, prise
+en compte des absences dans les projections, une connexion SQLite par
+requête, page d'erreur résiliente à une base indisponible, cycle de
+couleurs des projets immunisé contre une suppression définitive, collation
+insensible à la casse des noms de clients, routes de suppression qui ne
+mentent pas sur un id déjà supprimé, et déduplication des alertes du
+tableau de bord avec le bandeau de projets en difficulté.
 
 Chaque test documente en commentaire le bug qu'il empêche de revenir.
 
@@ -202,3 +214,9 @@ tests/              suite pytest
 
 Les migrations tournent à chaque démarrage : ajouter une colonne au schéma
 ne demande jamais de supprimer la base existante.
+
+Une connexion SQLite est ouverte par requête, pas par fonction appelée :
+`db.get_db()` la partage via `flask.g` pour toute la durée de la requête,
+fermée au teardown. Hors d'une requête (tests, scripts), chaque appel garde
+une connexion jetable — le module ne dépend de Flask que pour ça, et
+fonctionne toujours sans.

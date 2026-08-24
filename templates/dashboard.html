@@ -133,7 +133,7 @@
 <section class="card section-gap">
   <div class="card-title-row">
     <h3>Carte de charge — 8 prochaines semaines</h3>
-    <a href="{{ url_for('dashboard', include_provisional=0 if include_provisional else 1) }}" class="faint" style="text-decoration: underline;">
+    <a href="{{ url_for('dashboard', include_provisional=0 if include_provisional else 1, rank=rank_by) }}" class="faint" style="text-decoration: underline;">
       {{ 'masquer les provisoires' if include_provisional else 'inclure les provisoires' }}
     </a>
   </div>
@@ -248,9 +248,9 @@
   </div>
   <div class="rank-switch">
     <span class="faint">trier par</span>
-    <a href="{{ url_for('dashboard', rank='margin') }}" class="{{ 'is-active' if rank_by == 'margin' }}">montant</a>
-    <a href="{{ url_for('dashboard', rank='day_rate') }}" class="{{ 'is-active' if rank_by == 'day_rate' }}">marge / jour</a>
-    <a href="{{ url_for('dashboard', rank='index') }}" class="{{ 'is-active' if rank_by == 'index' }}">indice</a>
+    <a href="{{ url_for('dashboard', rank='margin', include_provisional=1 if include_provisional else 0) }}" class="{{ 'is-active' if rank_by == 'margin' }}">montant</a>
+    <a href="{{ url_for('dashboard', rank='day_rate', include_provisional=1 if include_provisional else 0) }}" class="{{ 'is-active' if rank_by == 'day_rate' }}">marge / jour</a>
+    <a href="{{ url_for('dashboard', rank='index', include_provisional=1 if include_provisional else 0) }}" class="{{ 'is-active' if rank_by == 'index' }}">indice</a>
   </div>
   <ul class="rank-list">
     {% for r in ranked %}

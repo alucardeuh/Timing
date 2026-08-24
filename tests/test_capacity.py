@@ -221,3 +221,66 @@ def test_grille_allocation_compare_engage_et_disponible(base):
     assert premiere["booked"] == 6.0      # 2 + 4 jours engagés
     assert premiere["free"] == -1.0
     assert premiere["over"] is True
+
+
+def test_fin_planifiee_est_une_borne_incluse(base):
+    """Une semaine vendue = lundi → dimanche, pas lundi → lundi suivant.
+
+    planned_end_date renvoyait `start + semaines * 7`, c'est-à-dire le
+    LENDEMAIN de la fin. Un projet d'une semaine démarré le lundi 2 mars
+    finissait le lundi 9 : six jours ouvrés de charge pour cinq jours
+    vendus, une barre Gantt trop longue, et l'alerte « fin prévue dépassée »
+    décalée d'un jour.
+    """
+    from datetime import date
+    import calculations as calc
+
+    project = {"start_date": "2026-03-02", "duration_value": 1,
+               "duration_unit": "weeks", "days_per_week": 5}
+
+    assert calc.planned_end_date(project) == date(2026, 3, 8)  # dimanche
+
+
+def test_une_semaine_vendue_occupe_cinq_jours_ouvres(base):
+    """Corollaire du précédent, côté carte de charge : c'est le symptôme
+    qu'on voyait réellement à l'écran."""
+    from datetime import timedelta
+    import calculations as calc
+    from conftest import SETTINGS, make_project
+
+    lundi = calc.week_monday(date.today())
+    project = make_project(days_per_week=5, duration_value=1,
+                           start_date=lundi.isoformat())
+    cap = calc.daily_capacity([project], lundi, 14, True,
+                              {**SETTINGS, "overrun_weeks": 0})
+    charges = [d for d in cap if d["pct_total"] > 0]
+
+    assert len(charges) == 5
+    assert charges[-1]["date"] == lundi + timedelta(days=4)  # vendredi, pas lundi
+
+
+def test_jours_declares_impossibles_affichent_la_surcharge(base):
+    """5 jours vendus concentrés sur 2 jours déclarés = 250 %, pas 100 %.
+
+    project_daily_pct plafonnait les jours DÉCLARÉS à 100 % (`min(..., 1.0)`)
+    sans plafonner les jours lissés. Résultat : la sur-réservation était
+    masquée précisément là où le planning est censé être littéral, et la
+    grille d'allocation comptait 2 jours engagés là où le contrat en vendait
+    5 — donc annonçait 3 jours libres qui n'existaient pas.
+    """
+    from datetime import timedelta
+    import calculations as calc
+    from conftest import SETTINGS, make_project
+
+    lundi = calc.week_monday(date.today())
+    project = make_project(days_per_week=5, duration_value=20, weekdays="0,1",
+                           start_date=(lundi - timedelta(days=7)).isoformat())
+    cap = calc.daily_capacity([project], lundi, 7, True, SETTINGS)
+
+    assert cap[0]["pct_total"] == 250.0
+    assert cap[0]["level"] == "storm"
+
+    # La grille d'allocation retrouve bien les 5 jours du contrat.
+    grid = calc.allocation_grid([project], lundi, 1, SETTINGS)
+    assert grid["totals"][0]["booked"] == 5.0
+    assert grid["totals"][0]["free"] == 0.0

@@ -32,11 +32,17 @@ def _secret_key():
 
     Une constante en dur dans le code source signifiait que n'importe qui
     disposant du dépôt pouvait forger un cookie de session valide.
+
+    Passe par get_setting_raw(), pas get_settings() : cette dernière filtre
+    désormais secret_key (voir db.INTERNAL_SETTING_KEYS) pour qu'elle
+    n'atterrisse jamais dans un template. Lire via get_settings() ici
+    aurait toujours renvoyé None, régénérant une nouvelle clé à chaque
+    démarrage — et invalidant les sessions de tout le monde à chaque fois.
     """
     if os.environ.get("TIMING_SECRET"):
         return os.environ["TIMING_SECRET"]
     db.init_db()
-    stored = db.get_settings().get("secret_key")
+    stored = db.get_setting_raw("secret_key")
     if not stored or stored == "0":
         stored = secrets.token_hex(32)
         db.set_setting("secret_key", stored)
@@ -45,12 +51,33 @@ def _secret_key():
 
 app.secret_key = _secret_key()
 
+# Une connexion SQLite par requête, partagée entre toutes les fonctions de
+# db.py qui l'appellent (voir db.get_db / db.release_db) : sans ce
+# teardown, la connexion posée sur `g` ne serait jamais fermée. Werkzeug
+# appelle les fonctions de teardown même quand la requête a levé une
+# exception, ce qui est le point.
+app.teardown_appcontext(db.close_db_for_request)
+
 PLANNING_WEEKS = 13
 PLANNING_WINDOW_DAYS = PLANNING_WEEKS * 7
 HOME_WINDOW_DAYS = 56      # 8 semaines
 ENTRIES_PER_PAGE = 50
 # Un projet terminé depuis moins de N jours reste saisissable dans la grille.
 COMPLETED_GRACE_DAYS = 15
+
+# Toute date saisie (entrée, jalon, coût, absence, début de projet...) doit
+# tomber dans cette fenêtre. Sans borne, une faute de frappe sur l'année
+# (2099 au lieu de 2029, 0225 au lieu de 2025) passait la validation de
+# FORMAT sans encombre et corrompait ensuite les agrégats ou explosait une
+# boucle jour par jour (build_absence_index développe l'intervalle complet).
+MIN_VALID_DATE = "2000-01-01"
+
+
+def _max_valid_date():
+    # Calculé à l'appel plutôt que figé : reste vrai dans dix ans sans y
+    # retoucher.
+    return f"{date.today().year + 10}-12-31"
+
 
 # Méthodes qui ne modifient rien : elles n'ont pas besoin de jeton.
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
@@ -143,12 +170,23 @@ def opt_float(form, field, label, minimum=None):
 
 def valid_date(value, label):
     """Valide une date ISO isolée (pas forcément issue d'un champ de
-    formulaire) et la renvoie, ou lève une FormError lisible."""
+    formulaire) et la renvoie, ou lève une FormError lisible.
+
+    La borne n'est pas qu'un contrôle de saisie cosmétique : une date
+    aberrante (année à trois ou six chiffres) peut faire boucler
+    calculations.build_absence_index() sur des dizaines de milliers de
+    jours, ou fausser silencieusement un graphique mensuel loin dans le
+    futur. La comparaison se fait en chaînes ISO — l'ordre lexicographique
+    suit l'ordre chronologique pour un format AAAA-MM-JJ fixe, pas besoin
+    de reparser en objets date.
+    """
     raw = (value or "").strip()
     try:
         datetime.strptime(raw, "%Y-%m-%d")
     except ValueError:
         raise FormError(f"« {label} » n'est pas une date valide (attendu AAAA-MM-JJ).")
+    if not (MIN_VALID_DATE <= raw <= _max_valid_date()):
+        raise FormError(f"« {label} » semble hors de portée ({raw}). Vérifie l'année.")
     return raw
 
 
@@ -247,9 +285,23 @@ def current_settings():
 
     db.get_settings() ouvrait une connexion à chaque appel : une fois dans le
     context_processor, puis une seconde fois dans presque chaque route.
+
+    Repli sur DEFAULT_SETTINGS si la base est indisponible (verrou, disque
+    plein, fichier corrompu). C'est cette fonction qu'appelle
+    `inject_globals()`, exécuté pour CHAQUE template — y compris
+    error.html : sans ce repli, une panne de base faisait échouer le
+    gestionnaire d'erreur 500 lui-même en tentant de la relire, et la
+    personne ne voyait plus la page d'erreur soignée mais l'écran brut de
+    Werkzeug.
     """
     if not hasattr(g, "_settings"):
-        g._settings = db.get_settings()
+        try:
+            g._settings = db.get_settings()
+        except Exception:
+            g._settings = {
+                key: (float(value) if key in db.FLOAT_SETTINGS else value)
+                for key, value in db.DEFAULT_SETTINGS.items()
+            }
     return g._settings
 
 
@@ -259,15 +311,21 @@ def percent_to_hours(percent, project, settings):
 
 # ------------------------------------------------------------- assemblage
 
-def project_rows(projects, settings, aggregates=None, costs=None, milestones=None):
+def project_rows(projects, settings, aggregates=None, costs=None, milestones=None,
+                 absences=None):
     """Construit [{project, stats}] pour une liste de projets, en une passe.
 
     Les agrégats arrivent d'une seule requête SQL : plus de get_entries()
     dans une boucle, donc plus de connexion ouverte par projet.
+
+    `absences` est chargé ici faute d'être fourni : sans lui, les
+    projections de project_stats ignorent les congés déclarés. Les pages qui
+    ont déjà la liste sous la main la passent, pour ne pas la relire.
     """
     aggregates = db.entries_aggregate_by_project() if aggregates is None else aggregates
     costs = db.costs_by_project() if costs is None else costs
     milestones = db.milestone_totals_by_project() if milestones is None else milestones
+    absences = db.list_absences() if absences is None else absences
     rows = []
     for p in projects:
         rows.append({
@@ -276,6 +334,7 @@ def project_rows(projects, settings, aggregates=None, costs=None, milestones=Non
                 p, aggregates.get(p["id"], calc.EMPTY_AGG), settings,
                 costs=costs.get(p["id"], {"absorbed": 0.0, "rebilled": 0.0}),
                 invoiced=milestones.get(p["id"], {"total": 0, "invoiced": 0, "paid": 0}),
+                absences=absences,
             ),
         })
     return rows
@@ -326,7 +385,11 @@ def dashboard():
     aggregates = db.entries_aggregate_by_project()
     costs = db.costs_by_project()
     milestone_totals = db.milestone_totals_by_project()
-    rows = project_rows(projects, settings, aggregates, costs, milestone_totals)
+    # Chargées avant l'assemblage : les mêmes absences servent aux
+    # projections des fiches ET à la carte de charge plus bas. Une seule
+    # lecture, une seule vérité.
+    absences = db.list_absences()
+    rows = project_rows(projects, settings, aggregates, costs, milestone_totals, absences)
 
     loggable = [p for p in projects if p["status"] in ("provisional", "confirmed")]
     cards = [r for r in rows if r["project"]["status"] in ("confirmed", "provisional")]
@@ -334,7 +397,6 @@ def dashboard():
     cards.sort(key=lambda c: order.get(c["stats"]["pace_status"], 2))
 
     include_provisional = request.args.get("include_provisional", "1") != "0"
-    absences = db.list_absences()
     window_start = calc.week_monday(today)
     capacity = calc.daily_capacity(projects, window_start, HOME_WINDOW_DAYS,
                                    include_provisional, settings, absences)
@@ -370,7 +432,7 @@ def dashboard():
     entries_recent = db.entries_by_day((today - timedelta(days=21)).isoformat(), today.isoformat())
     missing = calc.missing_days(entries_recent, settings, absences, today)
 
-    alerts = calc.build_alerts(rows, capacity, db.list_milestones(), missing, settings, today)
+    alerts = calc.build_alerts(rows, capacity, db.list_milestones(), missing, today)
     late = calc.late_projects(rows, settings, today)
 
     month_start = today.replace(day=1).isoformat()
@@ -384,6 +446,11 @@ def dashboard():
 
     break_even = calc.break_even(settings, db.days_spent_between(year_start, today.isoformat()))
 
+    # Une seule lecture : les deux valeurs ci-dessous (le détail par projet
+    # ET son total) en découlent, plutôt que de refaire la même requête
+    # GROUP BY deux fois pour la même page.
+    today_logged = db.today_summary(today.isoformat())
+
     return render_template(
         "dashboard.html",
         cards=cards, ranked=ranked[:5], loggable=loggable, break_even=break_even,
@@ -392,10 +459,10 @@ def dashboard():
         capacity=capacity, capacity_summary=calc.capacity_summary(capacity),
         capacity_scale=calc.capacity_scale(capacity),
         include_provisional=include_provisional,
-        today_logged=db.today_summary(today.isoformat()),
+        today_logged=today_logged,
         alerts=alerts, revenue=revenue, settings=settings,
         last_project=last_project,
-        logged_today_pct=round(sum(r["total_pct"] for r in db.today_summary(today.isoformat())), 0),
+        logged_today_pct=round(sum(r["total_pct"] for r in today_logged), 0),
     )
 
 
@@ -621,11 +688,16 @@ def edit_entry(entry_id):
 @app.route("/entries/<int:entry_id>/delete", methods=["POST"])
 def delete_entry(entry_id):
     entry = db.get_entry(entry_id)
+    if not entry:
+        # Déjà supprimée entre l'affichage et le clic (double clic, deux
+        # onglets) : dire « supprimée » ici mentirait sur ce qui vient de
+        # se passer, même si le résultat visible — plus d'entrée — se
+        # ressemble.
+        flash("Cette entrée n'existe plus.", "error")
+        return redirect(url_for("dashboard"))
     db.delete_entry(entry_id)
     flash("Entrée supprimée.", "success")
-    if entry:
-        return redirect(url_for("project_detail", project_id=entry["project_id"]))
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("project_detail", project_id=entry["project_id"]))
 
 
 # ------------------------------------------------------------- planning
@@ -806,7 +878,8 @@ def project_detail(project_id):
     milestone_totals = db.milestone_totals_by_project().get(
         project_id, {"total": 0, "invoiced": 0, "paid": 0})
 
-    stats = calc.project_stats(project, agg, settings, cost_split, milestone_totals)
+    stats = calc.project_stats(project, agg, settings, cost_split, milestone_totals,
+                               absences=db.list_absences())
 
     try:
         page = max(1, int(request.args.get("page", 1)))
@@ -1087,10 +1160,12 @@ def create_cost(project_id):
 @app.route("/costs/<int:cost_id>/delete", methods=["POST"])
 def delete_cost(cost_id):
     project_id = db.get_cost_project(cost_id)
+    if not project_id:
+        flash("Ce coût n'existe plus.", "error")
+        return redirect(url_for("dashboard"))
     db.delete_cost(cost_id)
     flash("Coût supprimé.", "success")
-    return redirect(url_for("project_detail", project_id=project_id) if project_id
-                    else url_for("dashboard"))
+    return redirect(url_for("project_detail", project_id=project_id))
 
 
 # ------------------------------------------------------------- clients
@@ -1099,13 +1174,17 @@ def delete_cost(cost_id):
 def clients():
     settings = current_settings()
     rows = project_rows(db.list_projects(), settings)
-    rollup = {c["client"]: c for c in calc.client_rollup(rows, db.milestone_totals_by_project(), settings)}
+    # Calculé une seule fois : la page en a besoin sous deux formes (la
+    # liste ordonnée pour l'affichage, le dict par nom pour un lookup
+    # rapide dans le template), pas deux fois la même agrégation.
+    rollup_list = calc.client_rollup(rows, db.milestone_totals_by_project(), settings)
+    rollup = {c["client"]: c for c in rollup_list}
     records = db.list_client_records()
     delays = db.payment_delays()
 
     return render_template(
         "clients.html", records=records, rollup=rollup, delays=delays,
-        clients=calc.client_rollup(rows, db.milestone_totals_by_project(), settings),
+        clients=rollup_list,
         cost_day_rate=calc.cost_day_rate(settings),
     )
 
@@ -1265,6 +1344,9 @@ def mark_day_off():
 
 @app.route("/absences/<int:absence_id>/delete", methods=["POST"])
 def delete_absence(absence_id):
+    if not db.get_absence(absence_id):
+        flash("Cette absence n'existe plus.", "error")
+        return redirect(url_for("absences"))
     db.delete_absence(absence_id)
     flash("Absence supprimée.", "success")
     return redirect(url_for("absences"))
