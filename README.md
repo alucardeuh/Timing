@@ -72,9 +72,9 @@ précisément quand un projet en dépassement mangeait les journées à venir.
 
 - **Aujourd'hui** (`/`) — bandeau rouge des projets en difficulté (fin
   dépassée, budget consommé, cadence en retard), alertes à traiter, saisie
-  rapide, carte de charge sur 8 semaines, chiffre d'affaires du mois et de
-  l'année vs objectifs, carnet de commandes, cartes projets. Uniquement ce
-  qui appelle une décision aujourd'hui.
+  rapide, **lecture des 8 prochaines semaines**, chiffre d'affaires du mois
+  et de l'année vs objectifs, carnet de commandes, cartes projets. Uniquement
+  ce qui appelle une décision aujourd'hui.
 - **Jour** (`/jour`) — une carte par projet, un grand champ de pourcentage,
   boutons 25/50/75/100 %, navigation veille / lendemain. Pensée pour le
   téléphone, là où la grille hebdo et ses neuf colonnes ne passent pas.
@@ -126,6 +126,32 @@ précisément quand un projet en dépassement mangeait les journées à venir.
 - **Absences** (`/absences`) — congés, fériés, indisponibilités.
 - **Réglages** (`/reglages`) — jours travaillés, seuils de charge, devise,
   seuil de fiabilité, alerte budget, objectifs de CA, exports et sauvegarde.
+
+## Trois façons de lire sa charge
+
+Elles répondent à trois questions différentes, et c'est la question qui doit
+guider vers l'une ou l'autre.
+
+**La lecture par semaine** (accueil et Planning) : *combien de jours me
+reste-t-il, et quand ça coince ?* Une ligne par semaine, un total en jours,
+une phrase — « 2 jours libres », « complet », « 2 jours de trop ». Rien à
+décoder : la couleur ne fait que confirmer ce que le texte dit déjà. C'est la
+lecture par défaut, parce que c'est la seule qui donne directement le chiffre
+avec lequel on décide.
+
+**La carte de charge, jour par jour** (repliée sous la lecture par semaine) :
+*quel jour précis déborde ?* Une colonne par jour ouvré, sa hauteur est la
+charge, le pointillé rouge marque 100 %. Question plus fine, qui ne se pose
+qu'après avoir repéré la semaine concernée.
+
+**Le Gantt** (Planning, onglet Calendrier) : *qui court en même temps que
+qui ?* Il ne dit rien des volumes, mais c'est le seul à montrer les
+chevauchements et les enchaînements. La grille d'Allocation, elle, donne les
+volumes semaine par semaine et par projet.
+
+Les trois réagrègent exactement les mêmes journées, jamais un calcul
+parallèle : deux vues de la même app qui racontent deux histoires seraient
+pires qu'une seule vue imparfaite.
 
 ## Concepts
 
@@ -229,7 +255,7 @@ pip install pytest
 python3 -m pytest tests/ -q
 ```
 
-154 tests sur les calculs, la couche données et les routes : capacité en
+166 tests sur les calculs, la couche données et les routes : capacité en
 jours ouvrés, dépassement, rentabilité et garde-fous de fiabilité, coût de
 revient, indépendance des jours vis-à-vis du réglage horaire, détection des
 jours non saisis, validation des statuts, corbeille, grille hebdo (dates,

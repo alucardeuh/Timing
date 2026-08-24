@@ -132,11 +132,19 @@
 
 <section class="card section-gap">
   <div class="card-title-row">
-    <h3>Carte de charge — 8 prochaines semaines</h3>
-    <a href="{{ url_for('dashboard', include_provisional=0 if include_provisional else 1, rank=rank_by) }}" class="faint" style="text-decoration: underline;">
+    <h3>Les 8 prochaines semaines</h3>
+    <a href="{{ url_for('dashboard', include_provisional=0 if include_provisional else 1) }}" class="faint" style="text-decoration: underline;">
       {{ 'masquer les provisoires' if include_provisional else 'inclure les provisoires' }}
     </a>
   </div>
+
+  {% include "_semaines.html" %}
+
+  {# La carte jour par jour reste disponible, repliée. Elle répond à une
+     question plus fine — quel jour précis déborde — qui ne se pose qu'après
+     avoir repéré la semaine concernée ci-dessus. #}
+  <details class="capacity-details">
+    <summary>Voir le détail jour par jour</summary>
 
   <p class="capacity-summary">
     Charge moyenne <strong class="mono">{{ capacity_summary.avg_load }}%</strong>
@@ -186,6 +194,7 @@
     <span><span class="swatch swatch-hatched"></span>part provisoire</span>
     <span class="faint legend-note">La hauteur d'une colonne est la charge du jour ; le pointillé rouge marque 100 % de ta capacité.</span>
   </div>
+  </details>
 </section>
 
 <section class="card section-gap">

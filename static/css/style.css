@@ -992,3 +992,85 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* =====================================================================
+   Lecture par semaine
+   Une ligne par semaine, un chiffre en jours, une phrase. Pas de hauteur
+   à comparer ni de couleur à décoder : la couleur ne fait que confirmer
+   ce que le texte dit déjà, elle ne le remplace pas.
+   ===================================================================== */
+.week-headline {
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-display); font-size: 16px; font-weight: 600;
+  line-height: 1.4;
+}
+
+.week-read { width: 100%; border-collapse: collapse; }
+.week-read td { padding: 7px var(--space-2); vertical-align: middle; }
+.week-line { border-bottom: 1px solid var(--border-soft); }
+.week-line:last-child { border-bottom: 0; }
+.week-line.is-current { background: var(--panel-2); }
+
+.wr-label { white-space: nowrap; color: var(--text-muted); font-size: 13.5px; }
+.wr-label strong { color: var(--text); font-family: var(--font-mono); font-weight: 600; }
+.wr-now {
+  margin-left: var(--space-2); font-size: 11px; font-weight: 600;
+  color: var(--accent-text); background: var(--accent-light);
+  border-radius: 4px; padding: 1px 6px;
+}
+
+.wr-bar { width: 45%; }
+.wr-track {
+  display: flex; height: 10px; border-radius: 5px;
+  background: var(--panel-2); overflow: hidden;
+  /* Le rail garde une bordure : une semaine à zéro doit rester visible en
+     tant que semaine, pas disparaître. */
+  box-shadow: inset 0 0 0 1px var(--border-soft);
+}
+.wr-fill { height: 100%; }
+.wr-confirmed { background: var(--load-light); }
+/* Hachures à 45°, comme partout ailleurs pour le provisoire : deux codes
+   différents pour la même notion obligeraient à en apprendre deux. */
+.wr-provisional {
+  background: var(--load-light);
+  background-image: repeating-linear-gradient(45deg,
+    rgba(255,255,255,.55) 0 3px, transparent 3px 6px);
+}
+.level-full .wr-confirmed, .level-full .wr-provisional { background-color: var(--load-heavy); }
+.level-tight .wr-confirmed, .level-tight .wr-provisional { background-color: var(--load-heavy); }
+.level-over .wr-confirmed, .level-over .wr-provisional { background-color: var(--load-storm); }
+
+.wr-numbers { white-space: nowrap; color: var(--text-muted); font-size: 13px; text-align: right; }
+.wr-phrase { white-space: nowrap; font-size: 13.5px; font-weight: 500; }
+.level-over .wr-phrase { color: var(--load-storm); }
+.level-full .wr-phrase, .level-tight .wr-phrase { color: var(--load-heavy); }
+.level-free .wr-phrase { color: var(--text-muted); }
+.level-off .wr-phrase, .level-off .wr-label { color: var(--text-faint); }
+.wr-flag {
+  margin-left: var(--space-2); font-size: 11px; font-weight: 600;
+  color: var(--load-storm); background: var(--load-storm-bg);
+  border-radius: 4px; padding: 1px 6px;
+}
+
+.capacity-details { margin-top: var(--space-5); }
+.capacity-details > summary {
+  cursor: pointer; font-size: 13px; color: var(--text-muted);
+  padding: var(--space-2) 0; list-style: none; user-select: none;
+}
+.capacity-details > summary::-webkit-details-marker { display: none; }
+.capacity-details > summary::before { content: "▸ "; color: var(--text-faint); }
+.capacity-details[open] > summary::before { content: "▾ "; }
+.capacity-details > summary:hover { color: var(--accent-text); }
+
+@media (max-width: 620px) {
+  /* La barre saute en premier : c'est la seule colonne dont le texte à
+     côté dit déjà tout. */
+  .wr-bar { display: none; }
+  .wr-label, .wr-phrase, .wr-numbers { font-size: 13px; }
+}
+
+@media print {
+  /* Un support de revue se lit sans replier ni déplier. */
+  .capacity-details > summary { display: none; }
+  .capacity-details > *:not(summary) { display: revert !important; }
+}

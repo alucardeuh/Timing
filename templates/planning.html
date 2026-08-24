@@ -100,6 +100,13 @@
   {% endif %}
 </section>
 
+{# Lecture d'ensemble, commune aux deux vues : elle répond à « où est le
+   problème » avant que l'une ou l'autre réponde à « à quoi il ressemble ». #}
+<section class="card section-gap">
+  <div class="card-title-row"><h3>Semaine par semaine</h3></div>
+  {% include "_semaines.html" %}
+</section>
+
 {% if view == 'semaines' %}
   {% if grid.groups %}
   <section class="card">
@@ -192,11 +199,10 @@
   {% if rows %}
   <section class="card">
     <p class="capacity-summary">
-      Charge moyenne <strong class="mono">{{ capacity_summary.avg_load }}%</strong>
-      sur {{ capacity_summary.working_days }} jours ouvrés ·
-      {{ capacity_summary.free_days }} libre(s) ·
-      {{ capacity_summary.heavy_days }} chargé(s) ·
-      {{ capacity_summary.storm_days }} en surcharge.
+      Cette vue montre les <strong>chevauchements</strong> : qui court en même
+      temps que qui, et sur quelles semaines les projets se superposent. Pour
+      les volumes, c'est la lecture par semaine ci-dessus ou l'onglet
+      Allocation.
     </p>
 
     <div class="gantt">

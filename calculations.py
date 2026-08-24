@@ -939,6 +939,102 @@ def scenario_impact(before, after):
     }
 
 
+def weekly_load(capacity, today=None):
+    """Regroupe la charge quotidienne par semaine, en JOURS et en phrases.
+
+    La carte de charge répond bien à « est-ce tenable ? », mais elle demande
+    de décoder des hauteurs et des couleurs pour en tirer le seul chiffre
+    dont on a besoin pour décider : combien de jours il reste. Cette lecture
+    donne directement ce chiffre, semaine par semaine, sans rien inventer —
+    elle réagrège exactement les mêmes journées.
+
+    Les jours se comptent en jours et non en pourcentages : « 2 jours
+    libres » se lit sans effort, « 60 % de charge moyenne » demande une
+    division mentale par le nombre de jours ouvrés de la semaine.
+    """
+    today = today or date.today()
+    semaines = {}
+    for jour in capacity:
+        debut = week_monday(jour["date"])
+        bloc = semaines.setdefault(debut, {
+            "start": debut, "days": 0, "booked": 0.0, "provisional": 0.0,
+            "overrun": False,
+        })
+        if jour["level"] == "off":
+            continue
+        bloc["days"] += 1
+        bloc["booked"] += jour["pct_total"] / 100.0
+        bloc["provisional"] += jour["pct_provisional"] / 100.0
+        bloc["overrun"] = bloc["overrun"] or jour["has_overrun"]
+
+    lignes = []
+    for debut in sorted(semaines):
+        bloc = semaines[debut]
+        capacite = bloc["days"]
+        engage = round(bloc["booked"], 2)
+        libre = round(capacite - engage, 2)
+
+        if capacite == 0:
+            niveau, phrase = "off", "semaine non travaillée"
+        elif libre < -0.05:
+            niveau = "over"
+            phrase = f"{_jours(-libre)} de trop"
+        elif libre < 0.5:
+            niveau = "full"
+            phrase = "complet"
+        elif libre < 1.5:
+            niveau = "tight"
+            phrase = f"{_jours(libre)} libre"
+        else:
+            niveau = "free"
+            phrase = f"{_jours(libre)} libres"
+
+        lignes.append({
+            "start": debut,
+            "end": debut + timedelta(days=6),
+            "label": debut.strftime("%d/%m"),
+            "capacity_days": capacite,
+            "booked_days": engage,
+            "provisional_days": round(bloc["provisional"], 2),
+            "free_days": libre,
+            "pct": round(engage / capacite * 100, 1) if capacite else 0,
+            "level": niveau,
+            "phrase": phrase,
+            "has_overrun": bloc["overrun"],
+            "is_current": debut <= today <= debut + timedelta(days=6),
+        })
+    return lignes
+
+
+def _jours(valeur):
+    """« 1 jour », « 2,5 jours » — la virgule décimale, pas le point."""
+    arrondi = round(valeur * 2) / 2      # au demi-jour : l'unité de vente
+    texte = f"{arrondi:g}".replace(".", ",")
+    return f"{texte} jour" if arrondi <= 1 else f"{texte} jours"
+
+
+def weekly_headline(lignes):
+    """Une phrase pour toute la fenêtre, à mettre en tête.
+
+    Sans elle, la lecture par semaine reste un tableau à parcourir : ce
+    qu'on veut savoir en arrivant, c'est s'il y a un problème et quand.
+    """
+    if not lignes:
+        return "Aucune semaine travaillée sur la période."
+    surcharge = [l for l in lignes if l["level"] == "over"]
+    libres = round(sum(l["free_days"] for l in lignes if l["free_days"] > 0), 1)
+    # « 0 jour disponibles ailleurs » : la phrase de repli ne doit pas se
+    # déclencher quand il n'y a rien à replier.
+    ailleurs = f" {_jours(libres)} disponibles ailleurs." if libres >= 0.5 else ""
+    if surcharge:
+        premiere = surcharge[0]
+        return (f"{len(surcharge)} semaine{'s' if len(surcharge) > 1 else ''} en surcharge, "
+                f"à partir du {premiere['label']}.{ailleurs}")
+    if libres < 0.5:
+        return "Aucune semaine en surcharge, et plus un jour de libre sur la période."
+    return f"Aucune semaine en surcharge. {_jours(libres)} disponibles sur la période."
+
+
 def capacity_scale(capacity, minimum=120):
     """Hauteur de référence des colonnes de la carte de charge.
 

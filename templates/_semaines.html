@@ -1,0 +1,39 @@
+{# Lecture par semaine, en jours et en phrases.
+
+   La carte de charge répond bien à « est-ce tenable ? », mais elle demande
+   de décoder des hauteurs et des couleurs pour en tirer le seul chiffre qui
+   sert à décider : combien de jours il reste. Ce bloc donne ce chiffre
+   directement, sans rien inventer — il réagrège exactement les mêmes
+   journées. #}
+<p class="week-headline">{{ weekly_headline }}</p>
+
+<table class="week-read">
+  <tbody>
+    {% for s in weekly %}
+    <tr class="week-line level-{{ s.level }} {{ 'is-current' if s.is_current }}">
+      <td class="wr-label">
+        semaine du <strong>{{ s.label }}</strong>
+        {% if s.is_current %}<span class="wr-now">en cours</span>{% endif %}
+      </td>
+      <td class="wr-bar">
+        <div class="wr-track">
+          {# Deux segments : le socle signé, puis la part provisoire par
+             dessus, pour qu'on voie d'un coup ce qui est acquis et ce qui
+             n'engage encore à rien. #}
+          <div class="wr-fill wr-confirmed"
+               style="width: {{ [((s.booked_days - s.provisional_days) / (s.capacity_days or 1) * 100), 100]|min|round(1) }}%;"></div>
+          <div class="wr-fill wr-provisional"
+               style="width: {{ [(s.provisional_days / (s.capacity_days or 1) * 100), 100]|min|round(1) }}%;"></div>
+        </div>
+      </td>
+      <td class="wr-numbers mono">
+        {{ '%g'|format(s.booked_days) }} / {{ s.capacity_days }} j
+      </td>
+      <td class="wr-phrase">
+        {{ s.phrase }}
+        {% if s.has_overrun %}<span class="wr-flag">projet prolongé</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
